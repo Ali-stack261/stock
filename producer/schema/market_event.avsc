@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "MarketEvent",
+  "namespace": "stock.ingestion",
+  "fields": [
+    {"name": "symbol", "type": "string"},
+    {"name": "price", "type": "double"},
+    {"name": "volume", "type": "double"},
+    {"name": "timestamp", "type": "string"},
+    {"name": "source", "type": "string"},
+    {"name": "idempotency_key", "type": "string"},
+    {"name": "received_at", "type": "string"}
+  ]
+}
