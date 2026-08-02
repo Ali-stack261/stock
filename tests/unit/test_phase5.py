@@ -43,15 +43,23 @@ def _sample_rows():
 
 
 class Phase5StorageTests(unittest.TestCase):
+    # Share one SparkSession for the whole file — avoids paying JVM startup
+    # cost once per test method (several seconds each).
+    @classmethod
+    def setUpClass(cls):
+        cls.spark = build_spark_session(app_name="test_phase5")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.spark.stop()
 
     # ------------------------------------------------------------------
     # Test: write_raw_batch creates partitioned Parquet files
     # ------------------------------------------------------------------
     def test_write_raw_batch_creates_partitioned_parquet(self):
-        spark = build_spark_session(app_name="test_phase5_raw_batch")
         with tempfile.TemporaryDirectory() as tmp:
             raw_path = os.path.join(tmp, "raw")
-            df = spark.createDataFrame(_sample_rows(), schema=_market_schema())
+            df = self.spark.createDataFrame(_sample_rows(), schema=_market_schema())
             write_raw_batch(df, raw_path)
 
             # Year / month / day partitions must exist
@@ -59,7 +67,7 @@ class Phase5StorageTests(unittest.TestCase):
             self.assertTrue(len(year_dirs) > 0, "Expected at least one year= partition")
 
             # Re-read and count rows
-            result = spark.read.parquet(raw_path)
+            result = self.spark.read.parquet(raw_path)
             self.assertEqual(result.count(), 4)
 
             # Partition columns present
@@ -69,20 +77,17 @@ class Phase5StorageTests(unittest.TestCase):
             self.assertIn("day",   cols)
             self.assertIn("symbol", cols)
 
-        spark.stop()
-
     # ------------------------------------------------------------------
     # Test: write_features_batch stores feature output correctly
     # ------------------------------------------------------------------
     def test_write_features_batch_creates_partitioned_parquet(self):
-        spark = build_spark_session(app_name="test_phase5_features_batch")
         with tempfile.TemporaryDirectory() as tmp:
             feat_path = os.path.join(tmp, "features")
-            df = spark.createDataFrame(_sample_rows(), schema=_market_schema())
+            df = self.spark.createDataFrame(_sample_rows(), schema=_market_schema())
             features = compute_features(df, mode="batch")
             write_features_batch(features, feat_path)
 
-            result = spark.read.parquet(feat_path)
+            result = self.spark.read.parquet(feat_path)
             self.assertEqual(result.count(), 4)
 
             cols = [f.name for f in result.schema.fields]
@@ -92,16 +97,13 @@ class Phase5StorageTests(unittest.TestCase):
             self.assertIn("year",         cols)
             self.assertIn("symbol",       cols)
 
-        spark.stop()
-
     # ------------------------------------------------------------------
     # Test: symbol partitioning — each symbol lands in its own directory
     # ------------------------------------------------------------------
     def test_symbol_partition_isolation(self):
-        spark = build_spark_session(app_name="test_phase5_symbol_partition")
         with tempfile.TemporaryDirectory() as tmp:
             raw_path = os.path.join(tmp, "raw")
-            df = spark.createDataFrame(_sample_rows(), schema=_market_schema())
+            df = self.spark.createDataFrame(_sample_rows(), schema=_market_schema())
             write_raw_batch(df, raw_path)
 
             # Navigate into year/month/day and find symbol= dirs
@@ -110,16 +112,13 @@ class Phase5StorageTests(unittest.TestCase):
             self.assertIn("BTCUSDT", symbols_found)
             self.assertIn("ETHUSDT", symbols_found)
 
-        spark.stop()
-
     # ------------------------------------------------------------------
     # Test: compact_partition merges small files into one
     # ------------------------------------------------------------------
     def test_compact_partition_reduces_file_count(self):
-        spark = build_spark_session(app_name="test_phase5_compact")
         with tempfile.TemporaryDirectory() as tmp:
             raw_path = os.path.join(tmp, "raw")
-            df = spark.createDataFrame(_sample_rows(), schema=_market_schema())
+            df = self.spark.createDataFrame(_sample_rows(), schema=_market_schema())
 
             # Write same partition twice (simulates two micro-batches)
             write_raw_batch(df.filter("symbol = 'BTCUSDT'"), raw_path, mode="append")
@@ -129,7 +128,7 @@ class Phase5StorageTests(unittest.TestCase):
             parquet_before = list(partition_path.glob("*.parquet"))
 
             row_count = compact_partition(
-                spark, raw_path, date(2026, 8, 1), "BTCUSDT"
+                self.spark, raw_path, date(2026, 8, 1), "BTCUSDT"
             )
 
             parquet_after = list(partition_path.glob("*.parquet"))
@@ -139,8 +138,6 @@ class Phase5StorageTests(unittest.TestCase):
                 len(parquet_before),
                 "Compaction should not increase the number of Parquet files",
             )
-
-        spark.stop()
 
     # ------------------------------------------------------------------
     # Test: apply_retention_policy removes old partitions

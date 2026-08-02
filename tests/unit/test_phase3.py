@@ -3,7 +3,6 @@ import unittest
 
 import pytest
 
-from pyspark.sql import SparkSession
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
 from streaming.feature_engineering import compute_features
@@ -11,6 +10,16 @@ from streaming.spark_stream import build_spark_session, get_market_event_schema
 
 
 class Phase3Tests(unittest.TestCase):
+    # Share one SparkSession for the whole file — avoids paying JVM startup
+    # cost once per test method (several seconds each).
+    @classmethod
+    def setUpClass(cls):
+        cls.spark = build_spark_session(app_name="test_phase3")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.spark.stop()
+
     def test_market_event_schema_has_expected_fields(self):
         schema = get_market_event_schema()
         self.assertEqual(
@@ -19,17 +28,14 @@ class Phase3Tests(unittest.TestCase):
         )
 
     def test_build_spark_session(self):
-        spark = build_spark_session(app_name="test_phase3")
-        self.assertEqual(spark.sparkContext.appName, "test_phase3")
-        spark.stop()
+        self.assertEqual(self.spark.sparkContext.appName, "test_phase3")
 
     # ------------------------------------------------------------------
     # Test: complete feature computation pipeline (Streaming Mode)
     # ------------------------------------------------------------------
     @pytest.mark.skipif(sys.platform == "win32", reason="Structured streaming in memory sink hangs on Windows")
     def test_compute_features_streaming_pipeline(self):
-        spark = build_spark_session(app_name="test_phase3_features")
-        rate_df = spark.readStream.format("rate").option("rowsPerSecond", 1).load()
+        rate_df = self.spark.readStream.format("rate").option("rowsPerSecond", 1).load()
 
         event_df = rate_df.selectExpr(
             "CAST(value % 3 AS STRING) as symbol",
@@ -68,10 +74,8 @@ class Phase3Tests(unittest.TestCase):
         )
         query.processAllAvailable()
         query.stop()
-        spark.stop()
 
     def test_compute_batch_features_pipeline(self):
-        spark = build_spark_session(app_name="test_phase4_batch")
         schema = StructType(
             [
                 StructField("symbol", StringType(), nullable=False),
@@ -88,14 +92,13 @@ class Phase3Tests(unittest.TestCase):
             ("BTCUSDT", 102.0, 8.0, "2026-08-01T00:01:00", "binance", "2", "2026-08-01T00:01:02"),
             ("ETHUSDT", 50.0, 5.0, "2026-08-01T00:00:00", "binance", "3", "2026-08-01T00:00:02"),
         ]
-        batch_df = spark.createDataFrame(rows, schema=schema)
+        batch_df = self.spark.createDataFrame(rows, schema=schema)
         features_df = compute_features(batch_df, mode="batch")
 
         self.assertTrue("ma5" in [field.name for field in features_df.schema.fields])
         self.assertTrue("price_return" in [field.name for field in features_df.schema.fields])
         self.assertTrue("volume_change" in [field.name for field in features_df.schema.fields])
         self.assertEqual(features_df.count(), 3)
-        spark.stop()
 
 
 if __name__ == "__main__":

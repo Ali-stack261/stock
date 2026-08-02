@@ -202,7 +202,7 @@ def _stateful_feature_fn(key, pdf_iter, state):
     volume_history: list[float] = []
 
     if state.exists:
-        stored = state.get()
+        stored = state.get  # GroupState.get is a @property, not a method
         last_price = stored[0]
         last_volume = stored[1]
         price_history = list(stored[2] or [])

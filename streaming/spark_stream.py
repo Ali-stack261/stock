@@ -33,6 +33,11 @@ def build_spark_session(app_name: str = "real_time_stock_stream") -> SparkSessio
         .appName(app_name)
         .config("spark.driver.extraJavaOptions", java17_opens)
         .config("spark.executor.extraJavaOptions", java17_opens)
+        # Disable the web UI — saves real startup time in tests and CI.
+        .config("spark.ui.enabled", "false")
+        # Spark defaults to 200 shuffle partitions; for tiny local test data
+        # that means 200 tasks doing trivial work.  2 is enough and fast.
+        .config("spark.sql.shuffle.partitions", "2")
         .getOrCreate()
     )
 
