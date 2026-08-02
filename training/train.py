@@ -12,6 +12,8 @@ Responsibilities
 - Evaluate the model against the baseline.
 """
 
+import mlflow
+import mlflow.spark
 from typing import Optional, Tuple
 
 from pyspark.ml import Pipeline
@@ -213,22 +215,47 @@ def train_gbt_model(
 
     pipeline = Pipeline(stages=[assembler, gbt])
     
-    # Train
-    model = pipeline.fit(train_df)
-    
-    # Evaluate
-    evaluator = RegressionEvaluator(
-        labelCol="target_price",
-        predictionCol="prediction",
-        metricName="rmse"
-    )
-    
-    train_preds = model.transform(train_df)
-    val_preds = model.transform(val_df)
-    
-    train_rmse = evaluator.evaluate(train_preds)
-    val_rmse = evaluator.evaluate(val_preds)
-    
+    # Start MLflow run
+    with mlflow.start_run():
+        # Log hyperparameters
+        mlflow.log_param("maxIter", 20)
+        mlflow.log_param("maxDepth", 5)
+        
+        # Log feature list
+        mlflow.log_param("features", ",".join(feature_cols))
+        
+        # Train
+        model = pipeline.fit(train_df)
+        
+        # Evaluate RMSE
+        evaluator_rmse = RegressionEvaluator(
+            labelCol="target_price",
+            predictionCol="prediction",
+            metricName="rmse"
+        )
+        
+        train_preds = model.transform(train_df)
+        val_preds = model.transform(val_df)
+        
+        train_rmse = evaluator_rmse.evaluate(train_preds)
+        val_rmse = evaluator_rmse.evaluate(val_preds)
+        
+        # Evaluate MAE
+        evaluator_mae = RegressionEvaluator(
+            labelCol="target_price",
+            predictionCol="prediction",
+            metricName="mae"
+        )
+        val_mae = evaluator_mae.evaluate(val_preds)
+        
+        # Log metrics
+        mlflow.log_metric("train_rmse", train_rmse)
+        mlflow.log_metric("val_rmse", val_rmse)
+        mlflow.log_metric("val_mae", val_mae)
+        
+        # Log the model
+        mlflow.spark.log_model(model, "gbt_model")
+        
     return model, train_rmse, val_rmse
 
 
