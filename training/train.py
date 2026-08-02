@@ -278,7 +278,7 @@ def train_gbt_model(
     val_df: DataFrame,
     feature_cols: Optional[list[str]] = None,
     label_col: str = TARGET_RETURN_COL,
-) -> Tuple["pyspark.ml.PipelineModel", float, float]:
+) -> Tuple["pyspark.ml.PipelineModel", float, float, str]:
     """Train a Gradient Boosted Trees model using Spark MLlib.
 
     Parameters
@@ -297,8 +297,9 @@ def train_gbt_model(
 
     Returns
     -------
-    Tuple[PipelineModel, float, float]
-        The trained Pipeline model, training RMSE, and validation RMSE.
+    Tuple[PipelineModel, float, float, str]
+        The trained Pipeline model, training RMSE, validation RMSE, and the
+        MLflow run ID (used to register the model in Phase 8).
     """
     if feature_cols is None:
         feature_cols = list(MODEL_FEATURE_COLS)
@@ -321,7 +322,7 @@ def train_gbt_model(
     pipeline = Pipeline(stages=[assembler, gbt])
 
     # Start MLflow run
-    with mlflow.start_run():
+    with mlflow.start_run() as run:
         # Log hyperparameters
         mlflow.log_param("maxIter", 20)
         mlflow.log_param("maxDepth", 5)
@@ -362,7 +363,9 @@ def train_gbt_model(
         # Log the model
         mlflow.spark.log_model(model, "gbt_model")
 
-    return model, train_rmse, val_rmse
+        run_id = run.info.run_id
+
+    return model, train_rmse, val_rmse, run_id
 
 
 def should_promote_challenger(
@@ -467,7 +470,7 @@ def train_and_evaluate(
         prepared_df, train_ratio=train_ratio, val_ratio=val_ratio
     )
 
-    model, train_rmse, val_rmse = train_gbt_model(train_df, val_df)
+    model, train_rmse, val_rmse, run_id = train_gbt_model(train_df, val_df)
 
     # --- Enforced gate: evaluate on the holdout test split -----------------
     test_preds = model.transform(test_df)
@@ -508,6 +511,7 @@ def train_and_evaluate(
 
     return {
         "model": model,
+        "run_id": run_id,
         "train_rmse": train_rmse,
         "val_rmse": val_rmse,
         "test_rmse": test_rmse,
