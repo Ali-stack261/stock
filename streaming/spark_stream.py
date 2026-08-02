@@ -8,7 +8,33 @@ from streaming.feature_engineering import compute_features
 
 
 def build_spark_session(app_name: str = "real_time_stock_stream") -> SparkSession:
-    return SparkSession.builder.appName(app_name).getOrCreate()
+    # JDK 17+ restricts reflective access to internal java.nio/sun.misc classes
+    # that Arrow's memory layer (DirectByteBuffer) requires.  Setting
+    # --add-opens here means the flags are applied whether PySpark is launched
+    # via pytest, spark-submit, or any other entry point — no external
+    # SPARK_SUBMIT_OPTS / PYSPARK_SUBMIT_ARGS needed.
+    java17_opens = " ".join([
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.net=ALL-UNNAMED",
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
+        "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
+        "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+    ])
+    return (
+        SparkSession.builder
+        .appName(app_name)
+        .config("spark.driver.extraJavaOptions", java17_opens)
+        .config("spark.executor.extraJavaOptions", java17_opens)
+        .getOrCreate()
+    )
 
 
 def get_market_event_schema() -> StructType:

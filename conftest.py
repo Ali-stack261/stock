@@ -15,13 +15,14 @@ cleanly on Windows rather than failing with an opaque JVM error.
 
 JVM module opens (JDK 17 / 21)
 --------------------------------
-When running PySpark via spark-submit, set SPARK_SUBMIT_OPTS (see
-spark-env.ps1 in the repo root). That env var is not read when PySpark is
-launched directly from Python (e.g. pytest); in that case the JVM args can be
-passed via SparkConf("spark.driver.extraJavaOptions") inside each SparkSession,
-or via ``--driver-java-options`` inside PYSPARK_SUBMIT_ARGS. The tests in this
-repo do not currently need those options because they run in local mode with
-JDK features that are still accessible by default.
+JDK 17+ restricts reflective access to internal java.nio / sun.misc classes
+that Arrow's memory layer (DirectByteBuffer) requires for stateful streaming
+(``applyInPandasWithState``).  The required ``--add-opens`` flags are now set
+programmatically inside ``build_spark_session()`` in
+``streaming/spark_stream.py`` via ``spark.driver.extraJavaOptions`` /
+``spark.executor.extraJavaOptions``.  This means the flags are active
+regardless of how PySpark is launched (pytest, spark-submit, etc.) — no
+external ``SPARK_SUBMIT_OPTS`` / ``PYSPARK_SUBMIT_ARGS`` is needed.
 """
 
 import os

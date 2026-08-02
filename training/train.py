@@ -12,7 +12,7 @@ Responsibilities
 - Evaluate the model against the baseline.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 from pyspark.ml import Pipeline
 from pyspark.ml.evaluation import RegressionEvaluator
@@ -23,6 +23,55 @@ from pyspark.sql.functions import col, lag, percent_rank
 from pyspark.sql.window import Window
 
 from streaming.feature_engineering import compute_features
+
+
+def validate_training_data(df: DataFrame) -> DataFrame:
+    """Validate and clean raw training data before feature engineering.
+
+    Applies the same business-rule checks used by ``normalize_event()`` in the
+    streaming path so that bad records that somehow made it into the data lake
+    cannot silently corrupt model training.
+
+    Checks performed:
+    - ``price > 0`` — non-positive prices are impossible and indicate corrupt
+      data or pipeline bugs.
+    - ``volume >= 0`` — negative volumes are impossible.
+    - ``timestamp`` is non-null/non-empty — rows without a timestamp cannot be
+      ordered chronologically and must be dropped.
+    - Duplicate ``idempotency_key`` values — keeps only the first occurrence so
+      replayed events do not inflate the training set.
+
+    Parameters
+    ----------
+    df:
+        Raw DataFrame of market events as loaded from the data lake.
+
+    Returns
+    -------
+    DataFrame
+        A cleaned DataFrame ready for feature engineering.
+    """
+    from pyspark.sql.functions import row_number
+    from pyspark.sql.window import Window as _Window
+
+    # 1. Drop rows with impossible price / volume values or missing timestamps.
+    cleaned = df.filter(
+        (col("price") > 0.0)
+        & (col("volume") >= 0.0)
+        & col("timestamp").isNotNull()
+        & (col("timestamp") != "")
+    )
+
+    # 2. Deduplicate on idempotency_key — keep the first arrival per key.
+    dedup_window = _Window.partitionBy("idempotency_key").orderBy("timestamp")
+    cleaned = (
+        cleaned
+        .withColumn("_row_num", row_number().over(dedup_window))
+        .filter(col("_row_num") == 1)
+        .drop("_row_num")
+    )
+
+    return cleaned
 
 
 def prepare_training_data(raw_df: DataFrame) -> DataFrame:
@@ -39,10 +88,13 @@ def prepare_training_data(raw_df: DataFrame) -> DataFrame:
         A DataFrame with features and a ``target_price`` column representing
         the price at the *next* tick for each symbol.
     """
-    # 1. Compute all features (guaranteed parity with streaming)
-    features_df = compute_features(raw_df, mode="batch")
+    # 1. Validate and clean raw data (drop impossible values, deduplicate keys)
+    validated_df = validate_training_data(raw_df)
 
-    # 2. Generate target variable (next tick's price)
+    # 2. Compute all features (parity with streaming via batch path)
+    features_df = compute_features(validated_df, mode="batch")
+
+    # 3. Generate target variable (next tick's price)
     # We use lag(..., -1) which looks 1 row *ahead* over the time window.
     window_spec = Window.partitionBy("symbol").orderBy("event_ts")
     
@@ -178,3 +230,52 @@ def train_gbt_model(
     val_rmse = evaluator.evaluate(val_preds)
     
     return model, train_rmse, val_rmse
+
+
+def should_promote_challenger(
+    challenger_rmse: float,
+    production_rmse: Optional[float],
+    min_improvement_pct: float = 0.0,
+) -> bool:
+    """Return True if the challenger model should replace the production model.
+
+    The challenger wins when it improves on the production model's validation
+    RMSE by at least ``min_improvement_pct`` percentage points.  If there is no
+    production model yet (``production_rmse is None``) the challenger is always
+    promoted — it's the first deployment.
+
+    Parameters
+    ----------
+    challenger_rmse:
+        Validation RMSE of the newly trained model.
+    production_rmse:
+        Validation RMSE of the currently deployed production model, or ``None``
+        if no model is in production yet.  This value can be loaded from
+        MLflow's model registry (Phase 7) or from a simple persisted metrics
+        file in the interim.
+    min_improvement_pct:
+        Minimum required improvement expressed as a percentage of the
+        production RMSE.  Defaults to ``0.0`` (any improvement wins).  Pass
+        e.g. ``1.0`` to require the challenger to be at least 1 % better.
+
+    Returns
+    -------
+    bool
+        ``True`` if the challenger should be promoted to production.
+
+    Examples
+    --------
+    >>> should_promote_challenger(0.95, 1.0)          # 5 % better → promote
+    True
+    >>> should_promote_challenger(1.01, 1.0)          # 1 % worse → reject
+    False
+    >>> should_promote_challenger(0.99, None)         # first deploy → promote
+    True
+    >>> should_promote_challenger(0.99, 1.0, min_improvement_pct=2.0)
+    False  # only 1 % better, threshold is 2 %
+    """
+    if production_rmse is None:
+        # No model in production — always promote the first challenger.
+        return True
+    improvement_pct = (production_rmse - challenger_rmse) / production_rmse * 100
+    return improvement_pct >= min_improvement_pct
