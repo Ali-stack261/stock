@@ -5,6 +5,7 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from producer.factory import build_transport
 from producer.normalize_event import normalize_event
 
 
@@ -22,7 +23,7 @@ class MarketWebSocketClient:
         self.source = source
         self.sources = [source, *(sources or [])]
         self.handler = handler
-        self.transport_factory = transport_factory or (lambda _source: None)
+        self.transport_factory = transport_factory or build_transport
         self.sleep_func = sleep_func or time.sleep
         self.current_source = source
         self._transport = None

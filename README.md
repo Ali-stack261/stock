@@ -13,6 +13,7 @@ This repository contains a starter implementation for the real-time stock price 
 - idempotency and receipt metadata generation
 - reconnect and failover handling for live streams
 - heartbeat-aware connection monitoring
+- concrete Binance and Finnhub websocket transports for real feed ingestion
 
 ## Setup
 
