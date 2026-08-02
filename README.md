@@ -7,6 +7,13 @@ This repository contains a starter implementation for the real-time stock price 
 - `producer/` – ingestion and event normalization modules
 - `tests/` – unit tests for the initial Phase 1 implementation
 
+## Phase 1 capabilities
+
+- normalized market event validation
+- idempotency and receipt metadata generation
+- reconnect and failover handling for live streams
+- heartbeat-aware connection monitoring
+
 ## Setup
 
 ```bash
