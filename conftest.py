@@ -31,15 +31,12 @@ import tempfile
 # ---------------------------------------------------------------------------
 # HADOOP_HOME — suppress the Hadoop Shell class-init crash on Windows
 # ---------------------------------------------------------------------------
-if sys.platform == "win32" and not os.environ.get("HADOOP_HOME"):
-    _fake_hadoop_home = tempfile.gettempdir()
-    _fake_bin = os.path.join(_fake_hadoop_home, "bin")
-    os.makedirs(_fake_bin, exist_ok=True)
-    _fake_winutils = os.path.join(_fake_bin, "winutils.exe")
-    if not os.path.exists(_fake_winutils):
-        open(_fake_winutils, "wb").close()
-        
-    os.environ["HADOOP_HOME"] = _fake_hadoop_home
+if sys.platform == "win32":
+    # Use the downloaded winutils binary in the .hadoop folder
+    hadoop_home = os.path.abspath(os.path.join(os.path.dirname(__file__), ".hadoop"))
+    hadoop_bin = os.path.join(hadoop_home, "bin")
+    os.environ["PATH"] = hadoop_bin + os.pathsep + os.environ.get("PATH", "")
+    os.environ["HADOOP_HOME"] = hadoop_home
     # hadoop.home.dir is the Java system property fallback; set it as an env
     # var so PySpark picks it up when building the JVM command line.
-    os.environ["hadoop.home.dir"] = _fake_hadoop_home
+    os.environ["hadoop.home.dir"] = hadoop_home

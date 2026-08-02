@@ -23,13 +23,10 @@ class Phase3Tests(unittest.TestCase):
         self.assertEqual(spark.sparkContext.appName, "test_phase3")
         spark.stop()
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "Spark streaming checkpoint writes require winutils.exe on Windows. "
-            "Run this test on Linux/macOS or in a Docker container."
-        ),
-    )
+    # ------------------------------------------------------------------
+    # Test: complete feature computation pipeline (Streaming Mode)
+    # ------------------------------------------------------------------
+    @pytest.mark.skipif(sys.platform == "win32", reason="Structured streaming in memory sink hangs on Windows")
     def test_compute_features_streaming_pipeline(self):
         spark = build_spark_session(app_name="test_phase3_features")
         rate_df = spark.readStream.format("rate").option("rowsPerSecond", 1).load()

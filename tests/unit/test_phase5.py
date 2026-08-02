@@ -47,7 +47,6 @@ class Phase5StorageTests(unittest.TestCase):
     # ------------------------------------------------------------------
     # Test: write_raw_batch creates partitioned Parquet files
     # ------------------------------------------------------------------
-    @pytest.mark.skipif(sys.platform == "win32", reason="Parquet writes on Windows require winutils.exe")
     def test_write_raw_batch_creates_partitioned_parquet(self):
         spark = build_spark_session(app_name="test_phase5_raw_batch")
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,7 +74,6 @@ class Phase5StorageTests(unittest.TestCase):
     # ------------------------------------------------------------------
     # Test: write_features_batch stores feature output correctly
     # ------------------------------------------------------------------
-    @pytest.mark.skipif(sys.platform == "win32", reason="Parquet writes on Windows require winutils.exe")
     def test_write_features_batch_creates_partitioned_parquet(self):
         spark = build_spark_session(app_name="test_phase5_features_batch")
         with tempfile.TemporaryDirectory() as tmp:
@@ -99,7 +97,6 @@ class Phase5StorageTests(unittest.TestCase):
     # ------------------------------------------------------------------
     # Test: symbol partitioning — each symbol lands in its own directory
     # ------------------------------------------------------------------
-    @pytest.mark.skipif(sys.platform == "win32", reason="Parquet writes on Windows require winutils.exe")
     def test_symbol_partition_isolation(self):
         spark = build_spark_session(app_name="test_phase5_symbol_partition")
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,7 +115,6 @@ class Phase5StorageTests(unittest.TestCase):
     # ------------------------------------------------------------------
     # Test: compact_partition merges small files into one
     # ------------------------------------------------------------------
-    @pytest.mark.skipif(sys.platform == "win32", reason="Parquet writes on Windows require winutils.exe")
     def test_compact_partition_reduces_file_count(self):
         spark = build_spark_session(app_name="test_phase5_compact")
         with tempfile.TemporaryDirectory() as tmp:

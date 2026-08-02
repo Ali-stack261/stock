@@ -245,6 +245,7 @@ def compact_partition(
         f"/day={partition_date.day}"
         f"/symbol={symbol}"
     )
+    tmp_path = partition_path + "_tmp"
 
     df = spark.read.parquet(partition_path)
     row_count = df.count()
@@ -253,9 +254,17 @@ def compact_partition(
         df
         .coalesce(1)
         .write
-        .mode(output_mode)
-        .parquet(partition_path)
+        .mode("overwrite")
+        .parquet(tmp_path)
     )
+
+    # Replace the old partition directory with the compacted one
+    sc = spark.sparkContext
+    fs = sc._jvm.org.apache.hadoop.fs.FileSystem.get(sc._jsc.hadoopConfiguration())
+    PathClass = sc._jvm.org.apache.hadoop.fs.Path
+    
+    fs.delete(PathClass(partition_path), True)
+    fs.rename(PathClass(tmp_path), PathClass(partition_path))
 
     return row_count
 
