@@ -15,6 +15,12 @@ This repository contains a starter implementation for the real-time stock price 
 - heartbeat-aware connection monitoring
 - concrete Binance and Finnhub websocket transports for real feed ingestion
 
+## Phase 2 capabilities
+
+- Kafka producer publishing for normalized market events
+- idempotent, acknowledged delivery settings
+- partitioning by symbol key for ordered per-ticker events
+
 ## Setup
 
 ```bash
