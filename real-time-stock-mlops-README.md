@@ -209,26 +209,33 @@ Watermarking for late data (handles out-of-order ticks)
 
 ## Phase 4 – Feature Engineering
 
-Spark transforms raw prices into meaningful machine learning features.
+A shared feature-engineering module now supports both streaming-safe and batch training-safe paths.
 
-### Features
+### Implementation
+
+- `streaming.feature_engineering.compute_features(mode="streaming")` uses time-window aggregation and watermarking so Spark Structured Streaming avoids unsupported row-ordering window functions.
+- `streaming.feature_engineering.compute_features(mode="batch")` uses row-ordering window functions for batch training and validation, preserving train/serve parity.
+- Input validation is applied before feature computation to ensure `price > 0`, `volume >= 0`, and valid timestamps.
+
+### Implemented features
 
 - Moving Average (MA5)
 - Moving Average (MA20)
-- Exponential Moving Average (EMA)
-- RSI
-- MACD
 - VWAP
-- Rolling Standard Deviation
-- Momentum
-- Percentage Return
-- Volume Change
-- Price Difference
+- Price change
+- Price return
+- Volume change
+- Price range
+
+### Phase 4 parity guarantees
+- streaming + batch pipelines share the same Python feature-engineering package
+- feature naming is consistent across stream and batch outputs
+- the same validated event schema is the source of truth for online and offline computation
 
 ### Data quality additions
-- **Schema + range validation** (e.g. price > 0, volume ≥ 0) using Great Expectations or Pandera before features are computed.
-- **Feature parity tests**: the same feature-computation code path is used for both streaming (online) and batch (training) pipelines, to guarantee no train/serve skew.
-- Features are written to the **Feast online store** (low-latency, e.g. Redis) for serving, and the **offline store** (Parquet/Data Lake) for training — both fed from the same transformation logic.
+- **Schema + range validation** before the feature pipeline runs
+- **Feature parity tests** verify shared code across batch and stream modes
+- Features can be exported to **offline Parquet** and later ingested into an online store such as Feast or Redis
 
 ---
 
