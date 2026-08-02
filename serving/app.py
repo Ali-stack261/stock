@@ -36,6 +36,13 @@ from serving.predictor import PredictionResult, Predictor
 logger = logging.getLogger("serving")
 logging.basicConfig(level=logging.INFO)
 
+
+def _mask_key(key: str) -> str:
+    """Show only the last 4 characters, e.g. 'dev-key-12345' -> '****2345'."""
+    if len(key) <= 4:
+        return "*" * len(key)
+    return "*" * (len(key) - 4) + key[-4:]
+
 # ---------------------------------------------------------------------------
 # Rate limiter — simple in-memory sliding-window counter per API key.
 # ---------------------------------------------------------------------------
@@ -140,7 +147,7 @@ async def predict(
         "prediction request: symbol=%s current_price=%s api_key=%s",
         request.symbol,
         request.current_price,
-        api_key,
+        _mask_key(api_key),
     )
 
     features = {

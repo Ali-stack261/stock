@@ -18,10 +18,24 @@ DEFAULT_API_KEY = "dev-key-12345"
 
 
 def get_valid_api_keys() -> set[str]:
-    """Return the set of valid API keys from the environment."""
+    """Return the set of valid API keys from the environment.
+
+    Falls back to ``DEFAULT_API_KEY`` only when explicitly running in dev mode
+    (``STOCK_ENV=development`` or unset).  In any other environment, a missing
+    ``STOCK_API_KEYS`` is a hard configuration error, not a silent fallback —
+    the default key is publicly visible in the repo, so using it in staging or
+    production is effectively no authentication at all.
+    """
     raw = os.environ.get("STOCK_API_KEYS", "")
     if raw:
         return {k.strip() for k in raw.split(",") if k.strip()}
+
+    env = os.environ.get("STOCK_ENV", "development")
+    if env != "development":
+        raise RuntimeError(
+            "STOCK_API_KEYS is not set and STOCK_ENV is not 'development'. "
+            "Refusing to start with the default dev API key in a non-dev environment."
+        )
     return {DEFAULT_API_KEY}
 
 
