@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from serving.auth import verify_api_key
 from serving.predictor import PredictionResult, Predictor
+from serving.prediction_store import PredictionStore
 
 logger = logging.getLogger("serving")
 logging.basicConfig(level=logging.INFO)
@@ -74,6 +75,20 @@ class RateLimiter:
 
 rate_limiter = RateLimiter()
 
+# ---------------------------------------------------------------------------
+# Prediction store — persists every prediction for later realized-error
+# backfill and rolling online accuracy (Phase 10).
+# ---------------------------------------------------------------------------
+_prediction_store: Optional[PredictionStore] = None
+
+
+def get_prediction_store() -> PredictionStore:
+    """Return the singleton PredictionStore instance."""
+    global _prediction_store
+    if _prediction_store is None:
+        _prediction_store = PredictionStore()
+    return _prediction_store
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -102,6 +117,19 @@ class PredictionResponse(BaseModel):
     model_version: str
     confidence_interval: list[float]
     prediction_timestamp: str
+
+
+class PredictionHistoryItem(BaseModel):
+    """A single stored prediction row (Phase 10)."""
+
+    id: int
+    timestamp: str
+    symbol: str
+    current_price: float
+    predicted_price: float
+    predicted_return: float
+    model_version: str
+    realized_error: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +164,7 @@ async def predict(
     request: PredictionRequest,
     api_key: str = Depends(verify_api_key),
     predictor: Predictor = Depends(get_predictor),
+    store: PredictionStore = Depends(get_prediction_store),
 ) -> PredictionResponse:
     """Return a next-tick price prediction.
 
@@ -175,6 +204,16 @@ async def predict(
         result.model_version,
     )
 
+    # Persist the prediction for later realized-error backfill (Phase 10).
+    store.save_prediction(
+        timestamp=result.prediction_timestamp,
+        symbol=request.symbol,
+        current_price=request.current_price,
+        predicted_price=result.predicted_price,
+        predicted_return=result.predicted_return,
+        model_version=result.model_version,
+    )
+
     return PredictionResponse(
         predicted_price=result.predicted_price,
         predicted_return=result.predicted_return,
@@ -182,6 +221,46 @@ async def predict(
         confidence_interval=list(result.confidence_interval),
         prediction_timestamp=result.prediction_timestamp,
     )
+
+
+@app.get("/predictions/{symbol}", response_model=list[PredictionHistoryItem])
+async def get_prediction_history(
+    symbol: str,
+    limit: int = 10,
+    api_key: str = Depends(verify_api_key),
+    store: PredictionStore = Depends(get_prediction_store),
+) -> list[PredictionHistoryItem]:
+    """Return recent stored predictions for a symbol (Phase 10)."""
+    records = store.get_recent_predictions(symbol, limit=limit)
+    return [
+        PredictionHistoryItem(
+            id=r.id,
+            timestamp=r.timestamp,
+            symbol=r.symbol,
+            current_price=r.current_price,
+            predicted_price=r.predicted_price,
+            predicted_return=r.predicted_return,
+            model_version=r.model_version,
+            realized_error=r.realized_error,
+        )
+        for r in records
+    ]
+
+
+@app.get("/metrics/accuracy")
+async def get_accuracy_metrics(
+    symbol: Optional[str] = None,
+    api_key: str = Depends(verify_api_key),
+    store: PredictionStore = Depends(get_prediction_store),
+) -> dict:
+    """Return rolling online accuracy metrics (RMSE, MAE) from realized predictions."""
+    rmse = store.compute_rolling_rmse(symbol=symbol)
+    mae = store.compute_rolling_mae(symbol=symbol)
+    return {
+        "symbol": symbol,
+        "rolling_rmse": rmse,
+        "rolling_mae": mae,
+    }
 
 
 @app.exception_handler(HTTPException)
