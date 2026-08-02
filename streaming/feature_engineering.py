@@ -16,7 +16,8 @@ from pyspark.sql.functions import (
     window,
 )
 from pyspark.sql.streaming.state import GroupStateTimeout
-from pyspark.sql.types import ArrayType, TimestampType
+from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
+from pyspark.sql.window import Window
 
 FEATURE_COLUMNS = [
     "symbol",
@@ -129,8 +130,53 @@ def compute_time_window_features(
 
 
 def compute_batch_features(df: DataFrame) -> DataFrame:
-    """Compute batch-safe features using the same time-window aggregation as streaming."""
-    return compute_time_window_features(df, watermark_duration=None)
+    """Compute tick-based batch features matching the streaming path.
+
+    Uses ``Window.rowsBetween`` to compute MA5 (last 5 ticks) and MA20 (last
+    20 ticks) ordered by event_ts within each symbol partition — the same
+    definition used by :func:`compute_stream_features` via stateful state.
+    This eliminates train/serve skew between the batch and streaming paths.
+    """
+    validated = validate_market_events(df)
+
+    w_base = Window.partitionBy("symbol").orderBy("event_ts")
+    w_ma5 = w_base.rowsBetween(-4, 0)   # last 5 ticks (current + 4 preceding)
+    w_ma20 = w_base.rowsBetween(-19, 0)  # last 20 ticks (current + 19 preceding)
+
+    return (
+        validated
+        .withColumn("price_change", col("price") - lag(col("price"), 1).over(w_base))
+        .withColumn(
+            "price_return",
+            expr(
+                "CASE WHEN lag(price, 1) OVER (PARTITION BY symbol ORDER BY event_ts) > 0 "
+                "THEN (price - lag(price, 1) OVER (PARTITION BY symbol ORDER BY event_ts)) "
+                "    / lag(price, 1) OVER (PARTITION BY symbol ORDER BY event_ts) "
+                "ELSE NULL END"
+            ),
+        )
+        .withColumn("volume_change", col("volume") - lag(col("volume"), 1).over(w_base))
+        .withColumn("ma5", avg(col("price")).over(w_ma5))
+        .withColumn("ma20", avg(col("price")).over(w_ma20))
+        .withColumn(
+            "vwap",
+            (sum_(col("price") * col("volume")).over(w_ma20) / sum_(col("volume")).over(w_ma20)),
+        )
+        .withColumn("price_range", max_(col("price")).over(w_ma20) - min_(col("price")).over(w_ma20))
+        .select(
+            col("symbol"),
+            col("event_ts"),
+            col("price"),
+            col("volume"),
+            col("price_change"),
+            col("price_return"),
+            col("volume_change"),
+            col("ma5"),
+            col("ma20"),
+            col("vwap"),
+            col("price_range"),
+        )
+    )
 
 
 def _stream_state_schema() -> StructType:

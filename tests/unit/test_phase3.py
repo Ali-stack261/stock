@@ -36,22 +36,16 @@ class Phase3Tests(unittest.TestCase):
 
         features_df = compute_features(event_df, mode="streaming", window_duration="1 minute", watermark_duration="1 minute")
         expected_columns = [
-            "window",
             "symbol",
-            "first_price",
-            "last_price",
-            "avg_price",
-            "max_price",
-            "min_price",
-            "first_volume",
-            "last_volume",
-            "volume_sum",
-            "vwap",
-            "ma5",
-            "ma20",
+            "event_ts",
+            "price",
+            "volume",
             "price_change",
             "price_return",
             "volume_change",
+            "ma5",
+            "ma20",
+            "vwap",
             "price_range",
         ]
 
