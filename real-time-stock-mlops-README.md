@@ -287,42 +287,43 @@ Benefits:
 
 ---
 
-## Phase 6 – Model Training
+## Phase 6 – Model Training ✅ Complete
 
-A scheduled workflow (Apache Airflow) periodically retrains the model.
+A scheduled workflow periodically retrains the model using historical data from the Parquet data lake.
 
 ```text
 Historical Data
         │
         ▼
-Data Validation (schema + drift sanity check)
+Feature Engineering (re-uses `compute_features(mode="batch")`)
         │
         ▼
-Feature Engineering (shared code with streaming path)
+Target Generation (shift price by -1 to predict next tick)
         │
         ▼
-Train Model (with time-based train/val/test split — never random split for time series)
+Train Model (with strict chronological train/val/test split)
         │
         ▼
-Evaluate (backtest against holdout period)
-        │
-        ▼
-Champion/Challenger comparison
-        │
-        ▼
-MLflow
+Evaluate (backtest against naive persistence baseline)
 ```
 
 **Important correction for time-series ML:** splits must be **chronological**, not random, to avoid look-ahead leakage (training on data that "sees the future" relative to validation).
 
-### Possible Models
+### Implementation
 
-- XGBoost
-- LightGBM
-- CatBoost
-- LSTM
-- Temporal Fusion Transformer (Advanced)
-- Baseline: naive persistence (`predicted[t+1] = price[t]`) — always keep this as a sanity-check baseline; a model that can't beat it isn't adding value.
+- `training.train.prepare_training_data()`: Loads raw data, computes features, and creates the `target_price` label.
+- `training.train.chronological_split()`: Splits data into 70/15/15 partitions strictly by time.
+- `training.train.evaluate_naive_baseline()`: Establishes a baseline RMSE score (assuming `prediction = current_price`).
+- `training.train.train_gbt_model()`: Trains a PySpark MLlib **Gradient Boosted Trees (GBTRegressor)** model and evaluates it against the baseline.
+
+### Test coverage
+
+| Test | Result |
+|---|---|
+| `test_prepare_training_data_creates_target_label` | ✅ Passed |
+| `test_chronological_split_preserves_time_ordering` | ✅ Passed |
+| `test_evaluate_naive_baseline` | ✅ Passed |
+| `test_train_gbt_model_completes_without_error` | ✅ Passed |
 
 ---
 
