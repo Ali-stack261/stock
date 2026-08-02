@@ -60,6 +60,10 @@ class Phase3Tests(unittest.TestCase):
             "ma20",
             "vwap",
             "price_range",
+            "ma5_ratio",
+            "ma20_ratio",
+            "vwap_ratio",
+            "price_range_ratio",
         ]
 
         self.assertEqual([field.name for field in features_df.schema.fields], expected_columns)
