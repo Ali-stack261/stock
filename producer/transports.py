@@ -21,6 +21,8 @@ class BaseWebSocketTransport:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._ws = self._loop.run_until_complete(websockets.connect(self.url))
+        if self.source == "finnhub":
+            self._loop.run_until_complete(self._ws.send(json.dumps({"type": "subscribe", "symbol": "BINANCE:BTCUSDT"})))
 
     def receive(self, timeout: Optional[float] = None) -> Optional[str]:
         if self._ws is None:

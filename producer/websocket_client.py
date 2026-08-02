@@ -5,6 +5,7 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from producer.adapters import adapt_payload
 from producer.factory import build_transport
 from producer.normalize_event import normalize_event
 
@@ -29,7 +30,8 @@ class MarketWebSocketClient:
         self._transport = None
 
     def process_message(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        event = normalize_event(payload, source=self.current_source)
+        adapted_payload = adapt_payload(payload, self.current_source)
+        event = normalize_event(adapted_payload, source=self.current_source)
         if self.handler is not None:
             self.handler(event)
         return event
