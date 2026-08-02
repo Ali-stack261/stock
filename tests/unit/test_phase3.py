@@ -56,6 +56,17 @@ class Phase3Tests(unittest.TestCase):
         ]
 
         self.assertEqual([field.name for field in features_df.schema.fields], expected_columns)
+
+        query = (
+            features_df
+            .writeStream
+            .format("memory")
+            .queryName("phase4_features_test")
+            .outputMode("append")
+            .start()
+        )
+        query.processAllAvailable()
+        query.stop()
         spark.stop()
 
     def test_compute_batch_features_pipeline(self):
