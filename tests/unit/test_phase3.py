@@ -43,10 +43,15 @@ class Phase3Tests(unittest.TestCase):
             "avg_price",
             "max_price",
             "min_price",
+            "first_volume",
+            "last_volume",
             "volume_sum",
             "vwap",
+            "ma5",
+            "ma20",
             "price_change",
             "price_return",
+            "volume_change",
             "price_range",
         ]
 

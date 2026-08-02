@@ -73,18 +73,68 @@ def compute_batch_features(df: DataFrame) -> DataFrame:
 def compute_stream_features(df: DataFrame, window_duration: str = "1 minute", watermark_duration: str = "2 minutes") -> DataFrame:
     """Compute streaming-safe features using time-window aggregation and watermarking."""
     validated = validate_market_events(df)
-    return (
+
+    base_window = (
         validated
         .withWatermark("event_ts", watermark_duration)
-        .groupBy(window(col("event_ts"), window_duration), col("symbol"))
+        .groupBy(window(col("event_ts"), window_duration).alias("window"), col("symbol"))
         .agg(
             first(col("price")).alias("first_price"),
             last(col("price")).alias("last_price"),
             avg(col("price")).alias("avg_price"),
             max_(col("price")).alias("max_price"),
             min_(col("price")).alias("min_price"),
+            first(col("volume")).alias("first_volume"),
+            last(col("volume")).alias("last_volume"),
             sum_(col("volume")).alias("volume_sum"),
             (sum_(col("price") * col("volume")) / sum_(col("volume"))).alias("vwap"),
+        )
+    )
+
+    ma5_window = (
+        validated
+        .withWatermark("event_ts", watermark_duration)
+        .groupBy(window(col("event_ts"), "5 minutes", window_duration).alias("ma5_window"), col("symbol"))
+        .agg(avg(col("price")).alias("ma5"))
+    )
+
+    ma20_window = (
+        validated
+        .withWatermark("event_ts", watermark_duration)
+        .groupBy(window(col("event_ts"), "20 minutes", window_duration).alias("ma20_window"), col("symbol"))
+        .agg(avg(col("price")).alias("ma20"))
+    )
+
+    joined = (
+        base_window
+        .join(
+            ma5_window,
+            (base_window["symbol"] == ma5_window["symbol"]) & (base_window["window"].end == ma5_window["ma5_window"].end),
+            how="left",
+        )
+        .join(
+            ma20_window,
+            (base_window["symbol"] == ma20_window["symbol"]) & (base_window["window"].end == ma20_window["ma20_window"].end),
+            how="left",
+        )
+    )
+
+    return (
+        joined
+        .select(
+            base_window["window"],
+            base_window["symbol"],
+            base_window["first_price"],
+            base_window["last_price"],
+            base_window["avg_price"],
+            base_window["max_price"],
+            base_window["min_price"],
+            base_window["first_volume"],
+            base_window["last_volume"],
+            base_window["volume_sum"],
+            base_window["vwap"],
+            ma5_window["ma5"],
+            ma20_window["ma20"],
         )
         .withColumn("price_change", col("last_price") - col("first_price"))
         .withColumn(
@@ -93,6 +143,7 @@ def compute_stream_features(df: DataFrame, window_duration: str = "1 minute", wa
                 "CASE WHEN first_price > 0 THEN (last_price - first_price) / first_price ELSE NULL END"
             ),
         )
+        .withColumn("volume_change", col("last_volume") - col("first_volume"))
         .withColumn("price_range", col("max_price") - col("min_price"))
     )
 
