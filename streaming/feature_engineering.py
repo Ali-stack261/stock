@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pyspark.sql import DataFrame, Window
+import pandas as pd
+from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
     avg,
     col,
@@ -14,6 +15,8 @@ from pyspark.sql.functions import (
     to_timestamp,
     window,
 )
+from pyspark.sql.streaming.state import GroupStateTimeout
+from pyspark.sql.types import ArrayType, TimestampType
 
 FEATURE_COLUMNS = [
     "symbol",
@@ -130,9 +133,111 @@ def compute_batch_features(df: DataFrame) -> DataFrame:
     return compute_time_window_features(df, watermark_duration=None)
 
 
+def _stream_state_schema() -> StructType:
+    return StructType(
+        [
+            StructField("last_price", DoubleType(), nullable=True),
+            StructField("last_volume", DoubleType(), nullable=True),
+            StructField("price_history", ArrayType(DoubleType()), nullable=False),
+            StructField("volume_history", ArrayType(DoubleType()), nullable=False),
+        ]
+    )
+
+
+def _stateful_feature_fn(key, pdf_iter, state):
+    if isinstance(key, tuple):
+        symbol = key[0]
+    else:
+        symbol = key
+
+    last_price = None
+    last_volume = None
+    price_history: list[float] = []
+    volume_history: list[float] = []
+
+    if state.exists:
+        stored = state.get()
+        last_price = stored[0]
+        last_volume = stored[1]
+        price_history = list(stored[2] or [])
+        volume_history = list(stored[3] or [])
+
+    rows = []
+
+    for pdf in pdf_iter:
+        pdf = pdf.sort_values(by="event_ts")
+        for _, row in pdf.iterrows():
+            price = float(row["price"])
+            volume = float(row["volume"])
+            event_ts = row["event_ts"]
+
+            price_change = float(price - last_price) if last_price is not None else None
+            price_return = float((price - last_price) / last_price) if last_price and last_price > 0 else None
+            volume_change = float(volume - last_volume) if last_volume is not None else None
+
+            price_history.append(price)
+            volume_history.append(volume)
+            if len(price_history) > 20:
+                price_history = price_history[-20:]
+                volume_history = volume_history[-20:]
+
+            recent_prices = price_history[-5:]
+            ma5 = float(sum(recent_prices) / len(recent_prices)) if recent_prices else None
+            ma20 = float(sum(price_history) / len(price_history)) if price_history else None
+            vwap = float(sum(p * v for p, v in zip(price_history, volume_history)) / sum(volume_history)) if sum(volume_history) > 0 else None
+            price_range = float(max(price_history) - min(price_history)) if price_history else None
+
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "event_ts": event_ts,
+                    "price": price,
+                    "volume": volume,
+                    "price_change": price_change,
+                    "price_return": price_return,
+                    "volume_change": volume_change,
+                    "ma5": ma5,
+                    "ma20": ma20,
+                    "vwap": vwap,
+                    "price_range": price_range,
+                }
+            )
+
+            last_price = price
+            last_volume = volume
+
+    if rows:
+        state.update((last_price, last_volume, price_history, volume_history))
+        yield pd.DataFrame(rows)
+
+
 def compute_stream_features(df: DataFrame, window_duration: str = "1 minute", watermark_duration: str = "2 minutes") -> DataFrame:
-    """Compute streaming-safe features using time-window aggregation and watermarking."""
-    return compute_time_window_features(df, window_duration=window_duration, watermark_duration=watermark_duration)
+    """Compute streaming-safe features using stateful per-symbol updates."""
+    validated = validate_market_events(df)
+    grouped = validated.groupby("symbol")
+    output_schema = StructType(
+        [
+            StructField("symbol", StringType(), nullable=False),
+            StructField("event_ts", TimestampType(), nullable=False),
+            StructField("price", DoubleType(), nullable=False),
+            StructField("volume", DoubleType(), nullable=False),
+            StructField("price_change", DoubleType(), nullable=True),
+            StructField("price_return", DoubleType(), nullable=True),
+            StructField("volume_change", DoubleType(), nullable=True),
+            StructField("ma5", DoubleType(), nullable=True),
+            StructField("ma20", DoubleType(), nullable=True),
+            StructField("vwap", DoubleType(), nullable=True),
+            StructField("price_range", DoubleType(), nullable=True),
+        ]
+    )
+
+    return grouped.applyInPandasWithState(
+        _stateful_feature_fn,
+        output_schema,
+        _stream_state_schema(),
+        outputMode="append",
+        timeoutConf=GroupStateTimeout.NoTimeout,
+    )
 
 
 def compute_features(
