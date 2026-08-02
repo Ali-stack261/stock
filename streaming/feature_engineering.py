@@ -28,6 +28,10 @@ FEATURE_COLUMNS = [
     "ma20",
     "vwap",
     "price_range",
+    "ma5_ratio",
+    "ma20_ratio",
+    "vwap_ratio",
+    "price_range_ratio",
 ]
 
 
@@ -126,6 +130,25 @@ def compute_time_window_features(
         )
         .withColumn("volume_change", col("last_volume") - col("first_volume"))
         .withColumn("price_range", col("max_price") - col("min_price"))
+        # Scale-invariant ratios (relative to the current price) so absolute price
+        # levels are never fed to tree-based models, which cannot extrapolate past
+        # the value ranges seen during training.
+        .withColumn(
+            "ma5_ratio",
+            expr("CASE WHEN last_price > 0 THEN ma5 / last_price ELSE NULL END"),
+        )
+        .withColumn(
+            "ma20_ratio",
+            expr("CASE WHEN last_price > 0 THEN ma20 / last_price ELSE NULL END"),
+        )
+        .withColumn(
+            "vwap_ratio",
+            expr("CASE WHEN last_price > 0 THEN vwap / last_price ELSE NULL END"),
+        )
+        .withColumn(
+            "price_range_ratio",
+            expr("CASE WHEN last_price > 0 THEN price_range / last_price ELSE NULL END"),
+        )
     )
 
 
@@ -163,6 +186,12 @@ def compute_batch_features(df: DataFrame) -> DataFrame:
             (sum_(col("price") * col("volume")).over(w_ma20) / sum_(col("volume")).over(w_ma20)),
         )
         .withColumn("price_range", max_(col("price")).over(w_ma20) - min_(col("price")).over(w_ma20))
+        # Scale-invariant ratios (relative to the current tick's price) — the
+        # same definitions used by the streaming path, keeping train/serve parity.
+        .withColumn("ma5_ratio", col("ma5") / col("price"))
+        .withColumn("ma20_ratio", col("ma20") / col("price"))
+        .withColumn("vwap_ratio", col("vwap") / col("price"))
+        .withColumn("price_range_ratio", col("price_range") / col("price"))
         .select(
             col("symbol"),
             col("event_ts"),
@@ -175,6 +204,10 @@ def compute_batch_features(df: DataFrame) -> DataFrame:
             col("ma20"),
             col("vwap"),
             col("price_range"),
+            col("ma5_ratio"),
+            col("ma20_ratio"),
+            col("vwap_ratio"),
+            col("price_range_ratio"),
         )
     )
 
@@ -246,6 +279,10 @@ def _stateful_feature_fn(key, pdf_iter, state):
                     "ma20": ma20,
                     "vwap": vwap,
                     "price_range": price_range,
+                    "ma5_ratio": (ma5 / price) if price > 0 else None,
+                    "ma20_ratio": (ma20 / price) if price > 0 else None,
+                    "vwap_ratio": (vwap / price) if price > 0 else None,
+                    "price_range_ratio": (price_range / price) if price > 0 else None,
                 }
             )
 
@@ -274,6 +311,10 @@ def compute_stream_features(df: DataFrame, window_duration: str = "1 minute", wa
             StructField("ma20", DoubleType(), nullable=True),
             StructField("vwap", DoubleType(), nullable=True),
             StructField("price_range", DoubleType(), nullable=True),
+            StructField("ma5_ratio", DoubleType(), nullable=True),
+            StructField("ma20_ratio", DoubleType(), nullable=True),
+            StructField("vwap_ratio", DoubleType(), nullable=True),
+            StructField("price_range_ratio", DoubleType(), nullable=True),
         ]
     )
 
