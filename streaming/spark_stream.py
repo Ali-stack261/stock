@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json
-from pyspark.sql.types import StructField, StructType, StringType, DoubleType, TimestampType
+from pyspark.sql.types import StructField, StructType, StringType, DoubleType
+
+from streaming.feature_engineering import compute_features
 
 
 def build_spark_session(app_name: str = "real_time_stock_stream") -> SparkSession:
@@ -41,6 +43,17 @@ def create_streaming_dataframe(spark: SparkSession, kafka_bootstrap_servers: str
         .select("data.*")
     )
     return parsed_stream
+
+
+def create_feature_stream(
+    spark: SparkSession,
+    kafka_bootstrap_servers: str,
+    kafka_topic: str,
+    window_duration: str = "1 minute",
+    watermark_duration: str = "2 minutes",
+):
+    parsed_stream = create_streaming_dataframe(spark, kafka_bootstrap_servers, kafka_topic)
+    return compute_features(parsed_stream, window_duration=window_duration, watermark_duration=watermark_duration)
 
 
 def run_streaming_query(parsed_stream, output_path: str):
