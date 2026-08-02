@@ -1,4 +1,11 @@
+import os
+import shutil
+import tempfile
+import uuid
+from pathlib import Path
 import unittest
+import mlflow
+from mlflow.tracking import MlflowClient
 
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
@@ -14,11 +21,15 @@ from training.train import (
 class Phase6Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
         cls.spark = build_spark_session(app_name="test_phase6")
+        cls._mlflow_tmp_dir = tempfile.mkdtemp()
+        mlflow.set_tracking_uri(Path(cls._mlflow_tmp_dir).as_uri())
 
     @classmethod
     def tearDownClass(cls):
         cls.spark.stop()
+        shutil.rmtree(cls._mlflow_tmp_dir, ignore_errors=True)
 
     def _sample_raw_data(self):
         schema = StructType([
@@ -91,12 +102,35 @@ class Phase6Tests(unittest.TestCase):
         
         feature_cols = ["price", "volume", "ma5"]
         
+        mlflow.set_experiment("test_completes_without_error")
         model, train_rmse, val_rmse = train_gbt_model(train_df, val_df, feature_cols)
         
         # It should run and return valid metrics
         self.assertIsNotNone(model)
         self.assertGreaterEqual(train_rmse, 0.0)
         self.assertGreaterEqual(val_rmse, 0.0)
+
+    def test_train_gbt_model_logs_to_mlflow(self):
+        raw_df = self._sample_raw_data()
+        prepared_df = prepare_training_data(raw_df)
+        train_df, val_df, _ = chronological_split(prepared_df, 0.6, 0.2)
+        feature_cols = ["price", "volume", "ma5"]
+
+        experiment_id = mlflow.create_experiment(f"test_{uuid.uuid4().hex}")
+        mlflow.set_experiment(experiment_id=experiment_id)
+
+        model, train_rmse, val_rmse = train_gbt_model(train_df, val_df, feature_cols)
+
+        client = MlflowClient()
+        runs = client.search_runs(experiment_ids=[experiment_id])
+        self.assertEqual(len(runs), 1)
+        run = runs[0]
+        self.assertIn("val_rmse", run.data.metrics)
+        self.assertAlmostEqual(run.data.metrics["val_rmse"], val_rmse, places=4)
+        self.assertEqual(run.data.params["maxDepth"], "5")
+        # Confirm the model artifact was actually logged, not just metrics
+        artifacts = client.list_artifacts(run.info.run_id)
+        self.assertTrue(any(a.path == "gbt_model" for a in artifacts))
 
 if __name__ == "__main__":
     unittest.main()
