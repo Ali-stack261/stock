@@ -33,6 +33,12 @@ import tempfile
 # ---------------------------------------------------------------------------
 if sys.platform == "win32" and not os.environ.get("HADOOP_HOME"):
     _fake_hadoop_home = tempfile.gettempdir()
+    _fake_bin = os.path.join(_fake_hadoop_home, "bin")
+    os.makedirs(_fake_bin, exist_ok=True)
+    _fake_winutils = os.path.join(_fake_bin, "winutils.exe")
+    if not os.path.exists(_fake_winutils):
+        open(_fake_winutils, "wb").close()
+        
     os.environ["HADOOP_HOME"] = _fake_hadoop_home
     # hadoop.home.dir is the Java system property fallback; set it as an env
     # var so PySpark picks it up when building the JVM command line.

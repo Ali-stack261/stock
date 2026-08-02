@@ -258,30 +258,32 @@ A shared feature-engineering module supports both a stateful streaming path and 
 
 ---
 
-## Phase 5 – Data Storage
+## Phase 5 – Data Storage ✅ Complete
 
-Every incoming event is stored in a data lake for future training.
+Every incoming event is stored in a data lake for future training. The storage layer uses partitioned Parquet files for both raw events and computed features.
 
-```text
-data/
-└── 2026/
-    └── 08/
-        └── 01/
-            └── symbol=BTCUSDT/
-                └── part-0001.parquet
-```
+### Implementation
 
-**Additions:**
-- Partition by `symbol` in addition to date, so training jobs for a single ticker don't scan the whole lake.
-- Apply **compaction** on a schedule (small-file problem is common with streaming writes).
-- Add a **retention/lifecycle policy** (e.g. move data older than 90 days to cold storage) to control cost.
+- `streaming.storage.write_raw_batch/stream()` and `write_features_batch/stream()` handle Parquet writes.
+- **Partitioning Strategy**: Data is partitioned by `year`, `month`, `day`, and `symbol` (e.g. `data/features/year=2026/month=08/day=01/symbol=BTCUSDT/`). This allows backtesting and training jobs for a specific ticker to scan only their relevant partitions.
+- **Compaction**: `compact_partition()` resolves the small-file problem caused by streaming micro-batches by merging all small Parquet files in a daily partition into a single file.
+- **Retention**: `apply_retention_policy()` controls storage costs by pruning partition directories older than a configurable retention window (default 90 days).
+
+### Test coverage
+
+| Test | Result |
+|---|---|
+| `test_write_raw_batch_creates_partitioned_parquet` | ⏭ Skipped on Windows (requires `winutils.exe`) |
+| `test_write_features_batch_creates_partitioned_parquet` | ⏭ Skipped on Windows |
+| `test_symbol_partition_isolation` | ⏭ Skipped on Windows |
+| `test_compact_partition_reduces_file_count` | ⏭ Skipped on Windows |
+| `test_apply_retention_policy_removes_old_data` | ✅ Passed |
+| `test_apply_retention_policy_dry_run_does_not_delete` | ✅ Passed |
 
 Benefits:
-
-- Historical analysis
-- Model retraining
-- Backtesting
-- Auditing
+- Historical analysis and backtesting
+- Auditing and data quality checks
+- Controlled storage costs via retention pruning
 
 ---
 
