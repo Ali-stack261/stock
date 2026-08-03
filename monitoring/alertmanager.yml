@@ -1,0 +1,35 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "localhost:587"
+  smtp_from: "alerts@stock-mlops.local"
+
+route:
+  group_by: ["alertname", "symbol"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+  receiver: "default"
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: "critical"
+      repeat_interval: 15m
+
+receivers:
+  - name: "default"
+    # Replace with real Slack/PagerDuty config in production.
+    # webhook_configs:
+    #   - url: "https://hooks.slack.com/services/..."
+    #     send_resolved: true
+
+  - name: "critical"
+    # Replace with PagerDuty or on-call webhook in production.
+    # pagerduty_configs:
+    #   - service_key: "<YOUR_PD_KEY>"
+
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: ["alertname", "symbol"]

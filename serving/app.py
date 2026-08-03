@@ -1,4 +1,4 @@
-"""serving/app.py – Phase 9 FastAPI prediction service.
+"""serving/app.py – Phase 11 FastAPI prediction service with Prometheus monitoring.
 
 Exposes a REST API for next-tick price predictions.  The model predicts the
 next *return* (scale-invariant), and the service converts it back to an
@@ -6,17 +6,27 @@ absolute price for the response.
 
 Endpoints
 ---------
-- ``GET /health`` — liveness check (no auth).
-- ``POST /predict`` — returns a predicted price, model version, and confidence
-  interval.  Requires API key auth.
+- ``GET  /health``            — liveness check (no auth).
+- ``POST /predict``           — returns a predicted price, model version, and
+                                confidence interval.  Requires API key auth.
+- ``GET  /predictions/{sym}`` — recent stored predictions for a symbol.
+- ``GET  /metrics/accuracy``  — rolling RMSE / MAE (Phase 10).
+- ``GET  /prometheus``        — Prometheus scrape endpoint (Phase 11, no auth).
 
-Security / observability additions (per Phase 9 spec):
-- **API key auth** on the prediction endpoint via ``X-API-Key`` header.
-- **Rate limiting** — a simple in-memory per-client request counter with a
-  configurable window (sufficient for a single-instance deployment; swap for
-  Redis-backed limiting in a multi-replica setup).
-- **Request/response logging** — every prediction request and its result are
-  logged for reproducibility and audit.
+Phase 9 additions:
+- API key auth on the prediction endpoint via ``X-API-Key`` header.
+- Rate limiting — in-memory per-client sliding-window counter.
+- Request/response logging for reproducibility and audit.
+
+Phase 10 additions:
+- Prediction persistence and realized-error backfill on each /predict call.
+
+Phase 11 additions:
+- Prometheus instruments (counters, histograms, gauges) for request rate,
+  latency, error rate, rolling RMSE/MAE, and prediction staleness.
+- ``/prometheus`` scrape endpoint (no auth) via prometheus_client ASGI app.
+  Mounted at ``/prometheus`` (not ``/metrics``) to avoid shadowing the
+  existing ``/metrics/accuracy`` JSON endpoint.
 """
 
 from __future__ import annotations
@@ -28,11 +38,21 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from prometheus_client import make_asgi_app
 from pydantic import BaseModel, Field
 
 from serving.auth import verify_api_key
-from serving.predictor import PredictionResult, Predictor
+from serving.metrics import (
+    predict_errors_total,
+    predict_latency_seconds,
+    predict_requests_total,
+    realized_predictions_total,
+    rolling_mae,
+    rolling_rmse,
+    unrealized_predictions_total,
+)
 from serving.prediction_store import PredictionStore
+from serving.predictor import PredictionResult, Predictor
 
 logger = logging.getLogger("serving")
 logging.basicConfig(level=logging.INFO)
@@ -137,9 +157,14 @@ class PredictionHistoryItem(BaseModel):
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Real-Time Stock Prediction API",
-    description="Next-tick price prediction service (Phase 9).",
+    description="Next-tick price prediction service (Phase 9–11).",
     version="1.0.0",
 )
+
+# Mount Prometheus scrape endpoint at /prometheus (no auth — standard pattern).
+# NOTE: mounted at /prometheus, NOT /metrics, to avoid shadowing the existing
+# /metrics/accuracy JSON endpoint (Starlette mounts capture the entire subtree).
+app.mount("/prometheus", make_asgi_app())
 
 # The predictor is created lazily so the app can start without a Spark session.
 _predictor: Optional[Predictor] = None
@@ -169,8 +194,14 @@ async def predict(
     """Return a next-tick price prediction.
 
     Requires a valid ``X-API-Key`` header.  Rate-limited per API key.
+    Prometheus counters and latency histograms are updated on every call.
     """
-    rate_limiter.check(api_key)
+    try:
+        rate_limiter.check(api_key)
+    except HTTPException:
+        predict_errors_total.labels(symbol=request.symbol, error_type="rate_limited").inc()
+        predict_requests_total.labels(symbol=request.symbol, status="error").inc()
+        raise
 
     logger.info(
         "prediction request: symbol=%s current_price=%s api_key=%s",
@@ -188,13 +219,20 @@ async def predict(
         "price_range_ratio": request.price_range_ratio,
     }
 
+    _t0 = time.perf_counter()
     try:
         result: PredictionResult = predictor.predict(features, request.current_price)
     except RuntimeError as exc:
         logger.error("prediction failed: %s", exc)
+        predict_errors_total.labels(symbol=request.symbol, error_type="model_error").inc()
+        predict_requests_total.labels(symbol=request.symbol, status="error").inc()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
+        )
+    finally:
+        predict_latency_seconds.labels(symbol=request.symbol).observe(
+            time.perf_counter() - _t0
         )
 
     logger.info(
@@ -210,6 +248,14 @@ async def predict(
     pending = store.get_oldest_unrealized_prediction(request.symbol)
     if pending is not None:
         store.realize_prediction(pending.id, request.current_price)
+        realized_predictions_total.labels(symbol=request.symbol).inc()
+        # Refresh accuracy gauges after each new realization.
+        rmse = store.compute_rolling_rmse(symbol=request.symbol)
+        mae = store.compute_rolling_mae(symbol=request.symbol)
+        if rmse is not None:
+            rolling_rmse.labels(symbol=request.symbol).set(rmse)
+        if mae is not None:
+            rolling_mae.labels(symbol=request.symbol).set(mae)
 
     # Persist the new prediction for later realized-error backfill (Phase 10).
     store.save_prediction(
@@ -220,6 +266,12 @@ async def predict(
         predicted_return=result.predicted_return,
         model_version=result.model_version,
     )
+
+    # Update staleness gauge — count of unrealized predictions after save.
+    unrealized = store.get_unrealized_predictions(symbol=request.symbol)
+    unrealized_predictions_total.labels(symbol=request.symbol).set(len(unrealized))
+
+    predict_requests_total.labels(symbol=request.symbol, status="ok").inc()
 
     return PredictionResponse(
         predicted_price=result.predicted_price,
