@@ -234,5 +234,48 @@ class Phase10APITests(unittest.TestCase):
         self.assertIsNotNone(body["rolling_mae"])
 
 
+    def test_predict_backfills_previous_prediction_for_same_symbol(self):
+        """Second /predict call for a symbol realizes the first prediction's error."""
+        AUTH = {"X-API-Key": DEFAULT_API_KEY}
+
+        # ---- first call: no prior prediction to realize ----
+        mock1 = MagicMock()
+        mock1.predict.return_value = PredictionResult(
+            predicted_price=101.0,
+            predicted_return=0.01,
+            model_version="v1",
+            confidence_interval=(100.0, 102.0),
+            prediction_timestamp="2026-08-01T10:20:35Z",
+        )
+        app.dependency_overrides[get_predictor] = lambda: mock1
+        resp1 = self.client.post("/predict", json={"symbol": "BTCUSDT", "current_price": 100.0}, headers=AUTH)
+        self.assertEqual(resp1.status_code, 200)
+
+        # ---- second call: current_price = 100.8 realizes the first prediction ----
+        mock2 = MagicMock()
+        mock2.predict.return_value = PredictionResult(
+            predicted_price=101.5,
+            predicted_return=0.015,
+            model_version="v1",
+            confidence_interval=(100.0, 102.0),
+            prediction_timestamp="2026-08-01T10:20:36Z",
+        )
+        app.dependency_overrides[get_predictor] = lambda: mock2
+        resp2 = self.client.post("/predict", json={"symbol": "BTCUSDT", "current_price": 100.8}, headers=AUTH)
+        self.assertEqual(resp2.status_code, 200)
+
+        # The history endpoint returns most-recent-first; find the first prediction by ID.
+        history = self.client.get("/predictions/BTCUSDT?limit=10", headers=AUTH).json()
+        first_prediction = next(r for r in history if r["id"] == 1)
+        self.assertIsNotNone(first_prediction["realized_error"])
+        self.assertAlmostEqual(
+            first_prediction["realized_error"], 100.8 - first_prediction["predicted_price"]
+        )
+
+        # The second (most-recent) prediction should still be unrealized.
+        second_prediction = next(r for r in history if r["id"] == 2)
+        self.assertIsNone(second_prediction["realized_error"])
+
+
 if __name__ == "__main__":
     unittest.main()

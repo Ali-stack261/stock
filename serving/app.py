@@ -204,7 +204,14 @@ async def predict(
         result.model_version,
     )
 
-    # Persist the prediction for later realized-error backfill (Phase 10).
+    # Realize the previous pending prediction for this symbol using the price
+    # observed *now* — this call's current_price is the actual outcome of
+    # whatever the last prediction for this symbol was trying to guess.
+    pending = store.get_oldest_unrealized_prediction(request.symbol)
+    if pending is not None:
+        store.realize_prediction(pending.id, request.current_price)
+
+    # Persist the new prediction for later realized-error backfill (Phase 10).
     store.save_prediction(
         timestamp=result.prediction_timestamp,
         symbol=request.symbol,

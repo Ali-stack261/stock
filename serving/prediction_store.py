@@ -138,6 +138,37 @@ class PredictionStore:
             ).fetchall()
         return [_row_to_record(r) for r in rows]
 
+    def get_oldest_unrealized_prediction(self, symbol: str) -> Optional[PredictionRecord]:
+        """Return the single oldest unrealized prediction for a symbol, or None.
+
+        Used to match each prediction to the *next* observed price for that
+        symbol, in strict chronological (FIFO) order — one tick realizes at
+        most one prediction, so predictions and their realizations stay
+        correctly paired even under bursty traffic.
+        """
+        row = self._conn.execute(
+            """
+            SELECT * FROM predictions
+            WHERE symbol = ? AND realized_error IS NULL
+            ORDER BY timestamp ASC
+            LIMIT 1
+            """,
+            (symbol,),
+        ).fetchone()
+        return _row_to_record(row) if row else None
+
+    def realize_prediction(self, prediction_id: int, actual_price: float) -> None:
+        """Backfill realized_error for one specific prediction by ID."""
+        self._conn.execute(
+            """
+            UPDATE predictions
+            SET realized_error = ? - predicted_price
+            WHERE id = ? AND realized_error IS NULL
+            """,
+            (actual_price, prediction_id),
+        )
+        self._conn.commit()
+
     # ------------------------------------------------------------------
     # Backfill realized errors
     # ------------------------------------------------------------------
