@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     predicted_price REAL    NOT NULL,
     predicted_return REAL   NOT NULL,
     model_version   TEXT    NOT NULL,
-    realized_error  REAL
+    realized_error  REAL,
+    realized_return_error REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_ts
@@ -74,6 +75,10 @@ class PredictionStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        try:
+            self._conn.execute("ALTER TABLE predictions ADD COLUMN realized_return_error REAL")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -158,14 +163,27 @@ class PredictionStore:
         return _row_to_record(row) if row else None
 
     def realize_prediction(self, prediction_id: int, actual_price: float) -> None:
-        """Backfill realized_error for one specific prediction by ID."""
+        """Backfill realized_error (price-space) and realized_return_error
+        (return-space, scale-invariant) for one specific prediction by ID."""
+        row = self._conn.execute(
+            "SELECT current_price, predicted_return FROM predictions WHERE id = ?",
+            (prediction_id,),
+        ).fetchone()
+        if row is None:
+            return
+        prev_current_price, predicted_return = row
+
+        actual_return = (actual_price - prev_current_price) / prev_current_price
+        return_error = actual_return - predicted_return
+
         self._conn.execute(
             """
             UPDATE predictions
-            SET realized_error = ? - predicted_price
+            SET realized_error = ? - predicted_price,
+                realized_return_error = ?
             WHERE id = ? AND realized_error IS NULL
             """,
-            (actual_price, prediction_id),
+            (actual_price, return_error, prediction_id),
         )
         self._conn.commit()
 
@@ -265,6 +283,19 @@ class PredictionStore:
         if n == 0:
             return None
         return row["sae"] / n
+
+
+    def compute_rolling_rmse_return(self, symbol: Optional[str] = None) -> Optional[float]:
+        """RMSE of realized_return_error — scale-invariant, comparable across symbols."""
+        query = "SELECT COUNT(*) as n, SUM(realized_return_error * realized_return_error) as sse FROM predictions WHERE realized_return_error IS NOT NULL"
+        params = ()
+        if symbol is not None:
+            query += " AND symbol = ?"
+            params = (symbol,)
+        row = self._conn.execute(query, params).fetchone()
+        if row["n"] == 0:
+            return None
+        return (row["sse"] / row["n"]) ** 0.5
 
 
 def _row_to_record(row: sqlite3.Row) -> PredictionRecord:

@@ -56,6 +56,12 @@ rolling_rmse = Gauge(
     labelnames=["symbol"],
 )
 
+rolling_rmse_return = Gauge(
+    "rolling_rmse_return",
+    "Rolling RMSE of realized return prediction error (scale-invariant, comparable across symbols).",
+    labelnames=["symbol"],
+)
+
 rolling_mae = Gauge(
     "rolling_mae",
     "Rolling MAE over all realized predictions for a symbol.",

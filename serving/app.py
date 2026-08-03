@@ -49,6 +49,7 @@ from serving.metrics import (
     realized_predictions_total,
     rolling_mae,
     rolling_rmse,
+    rolling_rmse_return,
     unrealized_predictions_total,
 )
 from serving.prediction_store import PredictionStore
@@ -251,9 +252,12 @@ async def predict(
         realized_predictions_total.labels(symbol=request.symbol).inc()
         # Refresh accuracy gauges after each new realization.
         rmse = store.compute_rolling_rmse(symbol=request.symbol)
+        rmse_return = store.compute_rolling_rmse_return(symbol=request.symbol)
         mae = store.compute_rolling_mae(symbol=request.symbol)
         if rmse is not None:
             rolling_rmse.labels(symbol=request.symbol).set(rmse)
+        if rmse_return is not None:
+            rolling_rmse_return.labels(symbol=request.symbol).set(rmse_return)
         if mae is not None:
             rolling_mae.labels(symbol=request.symbol).set(mae)
 

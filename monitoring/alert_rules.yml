@@ -23,15 +23,15 @@ groups:
       # ML: rolling RMSE spike
       # -----------------------------------------------------------------------
       - alert: HighRollingRMSE
-        expr: rolling_rmse > 500
+        expr: rolling_rmse_return > 0.02
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Rolling RMSE spike detected for {{ $labels.symbol }}"
+          summary: "Rolling return RMSE spike detected for {{ $labels.symbol }}"
           description: >
-            The rolling prediction RMSE for {{ $labels.symbol }} has exceeded 500
-            for more than 5 minutes (current: {{ $value | humanize }}).
+            The rolling RMSE of predicted returns for {{ $labels.symbol }} has exceeded 2%
+            for more than 5 minutes (current: {{ $value | humanizePercentage }}).
             Possible model drift — consider triggering retraining.
 
       # -----------------------------------------------------------------------
