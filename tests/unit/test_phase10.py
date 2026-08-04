@@ -29,6 +29,12 @@ class PredictionStoreTests(unittest.TestCase):
             predicted_price=118510.0,
             predicted_return=0.0008,
             model_version="v1",
+            price_return=0.001,
+            volume_change=5.0,
+            ma5_ratio=1.001,
+            ma20_ratio=0.998,
+            vwap_ratio=1.002,
+            price_range_ratio=0.005,
         )
         self.assertGreater(pid, 0)
 
@@ -39,6 +45,66 @@ class PredictionStoreTests(unittest.TestCase):
         self.assertAlmostEqual(record.predicted_price, 118510.0)
         self.assertEqual(record.model_version, "v1")
         self.assertIsNone(record.realized_error)
+        self.assertAlmostEqual(record.price_return, 0.001)
+        self.assertAlmostEqual(record.volume_change, 5.0)
+        self.assertAlmostEqual(record.ma5_ratio, 1.001)
+        self.assertAlmostEqual(record.ma20_ratio, 0.998)
+        self.assertAlmostEqual(record.vwap_ratio, 1.002)
+        self.assertAlmostEqual(record.price_range_ratio, 0.005)
+
+    def test_save_prediction_without_features_backward_compat(self):
+        pid = self.store.save_prediction(
+            timestamp="2026-08-01T10:20:35Z",
+            symbol="BTCUSDT",
+            current_price=100.0,
+            predicted_price=101.0,
+            predicted_return=0.01,
+            model_version="v1",
+        )
+        record = self.store.get_prediction(pid)
+        self.assertIsNotNone(record)
+        self.assertIsNone(record.price_return)
+        self.assertIsNone(record.volume_change)
+
+    def test_get_recent_feature_rows(self):
+        for i in range(5):
+            self.store.save_prediction(
+                timestamp=f"2026-08-01T10:20:{i:02d}Z",
+                symbol="BTCUSDT",
+                current_price=100.0 + i,
+                predicted_price=101.0 + i,
+                predicted_return=0.01,
+                model_version="v1",
+                price_return=0.01 + i * 0.001,
+                volume_change=5.0 + i,
+                ma5_ratio=1.001,
+                ma20_ratio=0.998,
+                vwap_ratio=1.002,
+                price_range_ratio=0.005,
+            )
+        df = self.store.get_recent_feature_rows("BTCUSDT", limit=3)
+        self.assertEqual(len(df), 3)
+        self.assertIn("price_return", df.columns)
+        self.assertIn("ma5_ratio", df.columns)
+
+    def test_get_recent_return_errors(self):
+        self.store.save_prediction(
+            timestamp="t1", symbol="BTCUSDT", current_price=100.0,
+            predicted_price=101.0, predicted_return=0.01, model_version="v1",
+        )
+        self.store.save_prediction(
+            timestamp="t2", symbol="BTCUSDT", current_price=100.0,
+            predicted_price=102.0, predicted_return=0.02, model_version="v1",
+        )
+        self.store.backfill_realized_errors({"t1": 101.5, "t2": 100.0})
+
+        s = self.store.get_recent_return_errors("BTCUSDT", limit=2)
+        self.assertEqual(len(s), 2)
+        # DESC order: t2 (newest) first, then t1.
+        # t2: actual_return = (100.0 - 100) / 100 = 0.0, return_error = 0.0 - 0.02 = -0.02
+        self.assertAlmostEqual(s.iloc[0], -0.02)
+        # t1: actual_return = (101.5 - 100) / 100 = 0.015, return_error = 0.015 - 0.01 = 0.005
+        self.assertAlmostEqual(s.iloc[1], 0.005)
 
     def test_get_recent_predictions(self):
         for i in range(5):

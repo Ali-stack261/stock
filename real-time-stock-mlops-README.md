@@ -442,7 +442,7 @@ Tools:
 
 ## Phase 12 – Drift Detection ✅ Complete
 
-A statistical drift-detection module compares live feature data and prediction errors against the training baseline to catch data and concept drift before model quality degrades.
+Drift detection is now fully wired into the serving layer: live features and prediction errors are persisted, compared against the training reference, and exposed via API and Prometheus.
 
 ### Implementation
 
@@ -451,6 +451,51 @@ A statistical drift-detection module compares live feature data and prediction e
 - **Concept drift** — compares live prediction-error distributions against the reference errors using the same statistical tests.
 - **Cooldown gating** — a configurable cooldown timer (default 30 min) suppresses duplicate retrain triggers so that a single drift event does not storm the retraining pipeline.
 - **Evidently AI integration** — when available, the module delegates to Evidently's `DataDriftPreset` and `RegressionErrorDistribution` metrics; otherwise it falls back to scipy/numpy implementations so tests run in minimal environments.
+
+### Wired data flow
+
+```text
+/predict (Phase 9)
+      │
+      ▼
+save_prediction() stores features alongside prediction (Phase 12)
+      │
+      ▼
+Periodic background task (every 15 min) + /drift/check endpoint
+      │
+      ▼
+DriftDetector.check(current_features, prediction_errors)
+      │
+      ▼
+Prometheus gauges: drift_detected, drift_feature_drift_detected, drift_concept_drift_detected
+```
+
+### Persisted feature history
+
+`PredictionStore` now stores the 6 scale-invariant features with every prediction:
+
+- `price_return`
+- `volume_change`
+- `ma5_ratio`
+- `ma20_ratio`
+- `vwap_ratio`
+- `price_range_ratio`
+
+These columns feed the `current_data` argument of `DriftDetector.check()`.
+
+### Reference dataset
+
+`training/train.py` (`train_and_evaluate`) saves a 10% sample of the training features as `reference_features.parquet` and logs it as an MLflow artifact. The serving app loads this file at startup to initialize the `DriftDetector`.
+
+### Periodic drift checks
+
+A FastAPI lifespan background task runs drift checks every 15 minutes for configured symbols (`BTCUSDT`, `ETHUSDT`). Results update three Prometheus gauges:
+
+- `drift_detected{symbol}` — 1 when any drift triggered.
+- `drift_feature_drift_detected{symbol}` — 1 when feature drift detected.
+- `drift_concept_drift_detected{symbol}` — 1 when concept drift detected.
+
+A manual `POST /drift/check?symbol=<sym>` endpoint (auth required) lets operators trigger an immediate check.
 
 ### Statistical tests
 
@@ -488,6 +533,11 @@ A statistical drift-detection module compares live feature data and prediction e
 | `test_compute_psi_returns_zero_for_identical_arrays` | ✅ Passed |
 | `test_compute_psi_returns_positive_for_shifted_arrays` | ✅ Passed |
 | `test_drift_report_repr` | ✅ Passed |
+| `test_drift_check_503_when_no_reference` | ✅ Passed |
+| `test_drift_check_422_when_no_feature_rows` | ✅ Passed |
+| `test_drift_check_returns_report_when_data_available` | ✅ Passed |
+| `test_drift_gauges_updated_after_check` | ✅ Passed |
+| `test_predict_persists_features` | ✅ Passed |
 
 ---
 

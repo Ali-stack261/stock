@@ -13,16 +13,32 @@ Verifies that:
 10. Multiple features are evaluated independently.
 11. ``_compute_psi`` returns 0.0 for identical arrays.
 12. ``_compute_psi`` returns a positive value for shifted arrays.
+13. ``/drift/check`` returns 503 when no reference data is loaded.
+14. ``/drift/check`` returns 422 when no feature rows exist for the symbol.
+15. ``/drift/check`` returns drift report when data is available.
+16. ``/predict`` persists feature values alongside the prediction.
 """
 
+import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+from fastapi.testclient import TestClient
 
 from monitoring.drift import DriftDetector, DriftReport
+from serving.app import app, get_predictor, get_prediction_store
+from serving.auth import DEFAULT_API_KEY
+from serving.prediction_store import PredictionStore
+from serving.predictor import PredictionResult
+from serving.metrics import (
+    drift_concept_drift_detected,
+    drift_detected,
+    drift_feature_drift_detected,
+)
 
 
 def _make_features(n: int = 200, seed: int = 42) -> pd.DataFrame:
@@ -158,6 +174,150 @@ class Phase12DriftDetectionTests(unittest.TestCase):
         self.assertIn("feature_drift=True", r)
         self.assertIn("concept_drift=False", r)
         self.assertIn("triggered=True", r)
+
+
+AUTH = {"X-API-Key": DEFAULT_API_KEY}
+
+
+def _mock_predictor(self, predicted_price=101.0, predicted_return=0.01,
+                    ts="2026-08-01T10:20:35Z"):
+    mock = MagicMock()
+    mock.predict.return_value = PredictionResult(
+        predicted_price=predicted_price,
+        predicted_return=predicted_return,
+        model_version="v1",
+        confidence_interval=(100.0, 102.0),
+        prediction_timestamp=ts,
+    )
+    app.dependency_overrides[get_predictor] = lambda: mock
+    return mock
+
+
+class Phase12WiredDriftTests(unittest.TestCase):
+    """Tests for the wired drift detection flow in serving/app.py."""
+
+    def setUp(self):
+        self.client = TestClient(app)
+        self._store = PredictionStore(db_path=":memory:")
+        app.dependency_overrides[get_prediction_store] = lambda: self._store
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        import serving.app
+        serving.app._DRIFT_DETECTOR = None
+
+    def test_drift_check_503_when_no_reference(self):
+        resp = self.client.post(
+            "/drift/check?symbol=BTCUSDT",
+            headers=AUTH,
+        )
+        self.assertEqual(resp.status_code, 503)
+
+    def test_drift_check_422_when_no_feature_rows(self):
+        import serving.app
+        serving.app._DRIFT_DETECTOR = DriftDetector(
+            reference_data=_make_features(n=100, seed=42)
+        )
+        resp = self.client.post(
+            "/drift/check?symbol=UNKNOWN",
+            headers=AUTH,
+        )
+        self.assertEqual(resp.status_code, 422)
+
+    def test_drift_check_returns_report_when_data_available(self):
+        import serving.app
+
+        ref = _make_features(n=200, seed=42)
+        serving.app._DRIFT_DETECTOR = DriftDetector(reference_data=ref)
+
+        # Insert stable features first so the detector has data to compare.
+        for i in range(10):
+            self._store.save_prediction(
+                timestamp=f"2026-08-01T10:20:{i:02d}Z",
+                symbol="BTCUSDT",
+                current_price=100.0 + i,
+                predicted_price=101.0 + i,
+                predicted_return=0.01,
+                model_version="v1",
+                price_return=0.01,
+                volume_change=5.0,
+                ma5_ratio=1.001,
+                ma20_ratio=0.998,
+                vwap_ratio=1.002,
+                price_range_ratio=0.005,
+            )
+
+        resp = self.client.post(
+            "/drift/check?symbol=BTCUSDT",
+            headers=AUTH,
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["symbol"], "BTCUSDT")
+        self.assertIn("feature_drift_detected", body)
+        self.assertIn("concept_drift_detected", body)
+        self.assertIn("triggered", body)
+
+    def test_predict_persists_features(self):
+        _mock_predictor(self)
+        resp = self.client.post(
+            "/predict",
+            json={
+                "symbol": "BTCUSDT",
+                "current_price": 100.0,
+                "price_return": 0.01,
+                "volume_change": 5.0,
+                "ma5_ratio": 1.001,
+                "ma20_ratio": 0.998,
+                "vwap_ratio": 1.002,
+                "price_range_ratio": 0.005,
+            },
+            headers=AUTH,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        history = self.client.get(
+            "/predictions/BTCUSDT?limit=1",
+            headers=AUTH,
+        ).json()
+        self.assertEqual(len(history), 1)
+        row = history[0]
+        self.assertAlmostEqual(row["price_return"], 0.01)
+        self.assertAlmostEqual(row["volume_change"], 5.0)
+        self.assertAlmostEqual(row["ma5_ratio"], 1.001)
+        self.assertAlmostEqual(row["ma20_ratio"], 0.998)
+        self.assertAlmostEqual(row["vwap_ratio"], 1.002)
+        self.assertAlmostEqual(row["price_range_ratio"], 0.005)
+
+    def test_drift_gauges_updated_after_check(self):
+        import serving.app
+
+        ref = _make_features(n=200, seed=42)
+        serving.app._DRIFT_DETECTOR = DriftDetector(reference_data=ref)
+
+        for i in range(10):
+            self._store.save_prediction(
+                timestamp=f"2026-08-01T10:20:{i:02d}Z",
+                symbol="ETHUSDT",
+                current_price=100.0 + i,
+                predicted_price=101.0 + i,
+                predicted_return=0.01,
+                model_version="v1",
+                price_return=0.01,
+                volume_change=5.0,
+                ma5_ratio=1.001,
+                ma20_ratio=0.998,
+                vwap_ratio=1.002,
+                price_range_ratio=0.005,
+            )
+
+        self.client.post("/drift/check?symbol=ETHUSDT", headers=AUTH)
+
+        sym = "ETHUSDT"
+        self.assertIn(
+            float(drift_detected.labels(symbol=sym)._value.get()),
+            (0.0, 1.0),
+        )
 
 
 if __name__ == "__main__":

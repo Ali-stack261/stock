@@ -1,4 +1,4 @@
-"""serving/metrics.py – Phase 11 Prometheus instrumentation.
+"""serving/metrics.py – Phase 11 Prometheus instrumentation + Phase 12 Drift.
 
 All Prometheus instruments for the real-time stock MLOps service are
 registered here.  Import this module once (via ``serving.app``) — the
@@ -6,7 +6,7 @@ registered here.  Import this module once (via ``serving.app``) — the
 import is sufficient.
 
 Metric catalogue
-----------------
+---------------
 Infrastructure / API
     predict_requests_total      Counter   Requests by symbol + outcome.
     predict_latency_seconds     Histogram Latency per /predict call.
@@ -14,9 +14,15 @@ Infrastructure / API
 
 ML / accuracy
     rolling_rmse                Gauge     Live RMSE from realized predictions.
+    rolling_rmse_return         Gauge     Live RMSE of return-space errors.
     rolling_mae                 Gauge     Live MAE from realized predictions.
     unrealized_predictions_total Gauge    Backlog of pending predictions (staleness proxy).
     realized_predictions_total  Counter   Cumulative count of realized predictions.
+
+Drift (Phase 12)
+    drift_detected              Gauge     1 when any drift is detected on last check.
+    drift_feature_drift_detected Gauge    1 when feature drift is detected.
+    drift_concept_drift_detected Gauge    1 when concept drift is detected.
 """
 
 from __future__ import annotations
@@ -77,5 +83,27 @@ unrealized_predictions_total = Gauge(
 realized_predictions_total = Counter(
     "realized_predictions_total",
     "Cumulative number of predictions that have been realized.",
+    labelnames=["symbol"],
+)
+
+# ---------------------------------------------------------------------------
+# Drift metrics (Phase 12)
+# ---------------------------------------------------------------------------
+
+drift_detected = Gauge(
+    "drift_detected",
+    "1 when any drift was detected on the most recent check, 0 otherwise.",
+    labelnames=["symbol"],
+)
+
+drift_feature_drift_detected = Gauge(
+    "drift_feature_drift_detected",
+    "1 when feature drift was detected on the most recent check, 0 otherwise.",
+    labelnames=["symbol"],
+)
+
+drift_concept_drift_detected = Gauge(
+    "drift_concept_drift_detected",
+    "1 when concept drift was detected on the most recent check, 0 otherwise.",
     labelnames=["symbol"],
 )

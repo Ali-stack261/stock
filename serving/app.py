@@ -5,13 +5,14 @@ next *return* (scale-invariant), and the service converts it back to an
 absolute price for the response.
 
 Endpoints
----------
+----------
 - ``GET  /health``            — liveness check (no auth).
 - ``POST /predict``           — returns a predicted price, model version, and
                                 confidence interval.  Requires API key auth.
 - ``GET  /predictions/{sym}`` — recent stored predictions for a symbol.
 - ``GET  /metrics/accuracy``  — rolling RMSE / MAE (Phase 10).
 - ``GET  /prometheus``        — Prometheus scrape endpoint (Phase 11, no auth).
+- ``POST /drift/check``       — run drift detection for a symbol (Phase 12, auth required).
 
 Phase 9 additions:
 - API key auth on the prediction endpoint via ``X-API-Key`` header.
@@ -27,22 +28,36 @@ Phase 11 additions:
 - ``/prometheus`` scrape endpoint (no auth) via prometheus_client ASGI app.
   Mounted at ``/prometheus`` (not ``/metrics``) to avoid shadowing the
   existing ``/metrics/accuracy`` JSON endpoint.
+
+Phase 12 additions:
+- Drift detection endpoint that compares recent live features and prediction
+  errors against the training reference distribution.
+- Periodic background drift checks every 15 minutes for configured symbols.
+- Prometheus gauges for feature-drift and concept-drift status.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from typing import Optional
 
+import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 from pydantic import BaseModel, Field
 
+from monitoring.drift import DriftDetector
+
 from serving.auth import verify_api_key
 from serving.metrics import (
+    drift_concept_drift_detected,
+    drift_detected,
+    drift_feature_drift_detected,
     predict_errors_total,
     predict_latency_seconds,
     predict_requests_total,
@@ -112,6 +127,77 @@ def get_prediction_store() -> PredictionStore:
 
 
 # ---------------------------------------------------------------------------
+# Drift detection wiring (Phase 12)
+# ---------------------------------------------------------------------------
+DRIFT_CHECK_INTERVAL_SECONDS = 900  # 15 minutes
+DRIFT_CHECK_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
+_DRIFT_TASK: Optional[asyncio.Task] = None
+_DRIFT_DETECTOR: Optional[DriftDetector] = None
+
+
+def _load_reference_data() -> Optional[pd.DataFrame]:
+    """Load the training reference feature sample saved by the training pipeline.
+
+    Tries ``reference_features.parquet`` in the working directory (saved by
+    ``train_and_evaluate``).  Falls back to ``None`` if the file is absent,
+    in which case drift checks return ``triggered=False`` with a warning.
+    """
+    import os
+
+    ref_path = "reference_features.parquet"
+    if os.path.exists(ref_path):
+        return pd.read_parquet(ref_path)
+    return None
+
+
+def _run_drift_check_for_symbol(symbol: str, store: PredictionStore) -> None:
+    """Execute one drift check cycle for ``symbol`` and update Prometheus gauges."""
+    if _DRIFT_DETECTOR is None:
+        return
+
+    recent_features = store.get_recent_feature_rows(symbol, limit=500)
+    recent_errors = store.get_recent_return_errors(symbol, limit=500)
+
+    if recent_features.empty:
+        logger.info("drift check skipped for %s: no feature rows yet", symbol)
+        return
+
+    report = _DRIFT_DETECTOR.check(recent_features, prediction_errors=recent_errors)
+
+    drift_detected.labels(symbol=symbol).set(int(report.triggered))
+    drift_feature_drift_detected.labels(symbol=symbol).set(int(report.feature_drift_detected))
+    drift_concept_drift_detected.labels(symbol=symbol).set(int(report.concept_drift_detected))
+
+    if report.triggered:
+        logger.warning(
+            "Drift trigger fired for %s: feature=%s concept=%s cooldown_active=%s",
+            symbol,
+            report.feature_drift_detected,
+            report.concept_drift_detected,
+            report.cooldown_active,
+        )
+
+
+async def _periodic_drift_task(store: PredictionStore) -> None:
+    """Background loop that runs drift checks on a fixed interval."""
+    global _DRIFT_DETECTOR
+    reference = _load_reference_data()
+    if reference is not None:
+        _DRIFT_DETECTOR = DriftDetector(reference_data=reference, cooldown_minutes=30)
+        logger.info("DriftDetector initialized with reference data (%d rows)", len(reference))
+    else:
+        logger.warning("No reference_features.parquet found — drift detection disabled until training saves one")
+
+    while True:
+        await asyncio.sleep(DRIFT_CHECK_INTERVAL_SECONDS)
+        for symbol in DRIFT_CHECK_SYMBOLS:
+            try:
+                _run_drift_check_for_symbol(symbol, store)
+            except Exception:
+                logger.exception("drift check failed for %s", symbol)
+
+
+# ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
 class PredictionRequest(BaseModel):
@@ -151,20 +237,50 @@ class PredictionHistoryItem(BaseModel):
     predicted_return: float
     model_version: str
     realized_error: Optional[float] = None
+    price_return: Optional[float] = None
+    volume_change: Optional[float] = None
+    ma5_ratio: Optional[float] = None
+    ma20_ratio: Optional[float] = None
+    vwap_ratio: Optional[float] = None
+    price_range_ratio: Optional[float] = None
+
+
+class DriftCheckResponse(BaseModel):
+    """Response from the drift check endpoint (Phase 12)."""
+
+    symbol: str
+    feature_drift_detected: bool
+    concept_drift_detected: bool
+    triggered: bool
+    cooldown_active: bool
+    feature_details: dict
+    concept_details: dict
 
 
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    global _DRIFT_TASK
+    store = get_prediction_store()
+    _DRIFT_TASK = asyncio.create_task(_periodic_drift_task(store))
+    yield
+    if _DRIFT_TASK is not None:
+        _DRIFT_TASK.cancel()
+
+
 app = FastAPI(
     title="Real-Time Stock Prediction API",
-    description="Next-tick price prediction service (Phase 9–11).",
+    description="Next-tick price prediction service (Phase 9–12).",
     version="1.0.0",
+    lifespan=_lifespan,
 )
 
+
 # Mount Prometheus scrape endpoint at /prometheus (no auth — standard pattern).
-# NOTE: mounted at /prometheus, NOT /metrics, to avoid shadowing the existing
-# /metrics/accuracy JSON endpoint (Starlette mounts capture the entire subtree).
+# NOTE: mounted at /prometheus`, NOT `/metrics`, to avoid shadowing the existing
+# `/metrics/accuracy` JSON endpoint (Starlette mounts capture the entire subtree).
 app.mount("/prometheus", make_asgi_app())
 
 # The predictor is created lazily so the app can start without a Spark session.
@@ -269,6 +385,12 @@ async def predict(
         predicted_price=result.predicted_price,
         predicted_return=result.predicted_return,
         model_version=result.model_version,
+        price_return=request.price_return,
+        volume_change=request.volume_change,
+        ma5_ratio=request.ma5_ratio,
+        ma20_ratio=request.ma20_ratio,
+        vwap_ratio=request.vwap_ratio,
+        price_range_ratio=request.price_range_ratio,
     )
 
     # Update staleness gauge — count of unrealized predictions after save.
@@ -305,6 +427,12 @@ async def get_prediction_history(
             predicted_return=r.predicted_return,
             model_version=r.model_version,
             realized_error=r.realized_error,
+            price_return=r.price_return,
+            volume_change=r.volume_change,
+            ma5_ratio=r.ma5_ratio,
+            ma20_ratio=r.ma20_ratio,
+            vwap_ratio=r.vwap_ratio,
+            price_range_ratio=r.price_range_ratio,
         )
         for r in records
     ]
@@ -324,6 +452,57 @@ async def get_accuracy_metrics(
         "rolling_rmse": rmse,
         "rolling_mae": mae,
     }
+
+
+@app.post("/drift/check", response_model=DriftCheckResponse)
+async def run_drift_check(
+    symbol: str,
+    api_key: str = Depends(verify_api_key),
+    store: PredictionStore = Depends(get_prediction_store),
+) -> DriftCheckResponse:
+    """Run drift detection for a symbol against the training reference.
+
+    Requires a valid ``X-API-Key`` header.  Compares recent live features and
+    prediction errors against the reference distribution saved during training.
+    """
+    if _DRIFT_DETECTOR is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DriftDetector not initialized — reference_features.parquet not found.",
+        )
+
+    recent_features = store.get_recent_feature_rows(symbol, limit=500)
+    recent_errors = store.get_recent_return_errors(symbol, limit=500)
+
+    if recent_features.empty:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No feature data available for symbol={symbol} yet.",
+        )
+
+    report = _DRIFT_DETECTOR.check(recent_features, prediction_errors=recent_errors)
+
+    drift_detected.labels(symbol=symbol).set(int(report.triggered))
+    drift_feature_drift_detected.labels(symbol=symbol).set(int(report.feature_drift_detected))
+    drift_concept_drift_detected.labels(symbol=symbol).set(int(report.concept_drift_detected))
+
+    if report.triggered:
+        logger.warning(
+            "Drift trigger fired for %s via /drift/check: feature=%s concept=%s",
+            symbol,
+            report.feature_drift_detected,
+            report.concept_drift_detected,
+        )
+
+    return DriftCheckResponse(
+        symbol=symbol,
+        feature_drift_detected=report.feature_drift_detected,
+        concept_drift_detected=report.concept_drift_detected,
+        triggered=report.triggered,
+        cooldown_active=report.cooldown_active,
+        feature_details=report.feature_details,
+        concept_details=report.concept_details,
+    )
 
 
 @app.exception_handler(HTTPException)

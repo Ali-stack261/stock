@@ -5,7 +5,12 @@ realized prices later to compute rolling online accuracy.
 
 Schema (matches the Phase 10 spec table):
 
-    | timestamp | symbol | current_price | predicted_price | model_version | realized_error |
+    | timestamp | symbol | current_price | predicted_price | predicted_return | model_version | realized_error | realized_return_error |
+
+Phase 12 additions — feature columns persisted alongside each prediction so
+live feature distributions can be compared against the training reference:
+
+    | price_return | volume_change | ma5_ratio | ma20_ratio | vwap_ratio | price_range_ratio |
 
 The ``realized_error`` column is initially NULL and is backfilled by
 ``backfill_realized_errors()`` once the actual future price is known.
@@ -36,6 +41,13 @@ class PredictionRecord:
     predicted_return: float
     model_version: str
     realized_error: Optional[float]
+    realized_return_error: Optional[float]
+    price_return: Optional[float]
+    volume_change: Optional[float]
+    ma5_ratio: Optional[float]
+    ma20_ratio: Optional[float]
+    vwap_ratio: Optional[float]
+    price_range_ratio: Optional[float]
 
 
 _SCHEMA = """
@@ -48,7 +60,13 @@ CREATE TABLE IF NOT EXISTS predictions (
     predicted_return REAL   NOT NULL,
     model_version   TEXT    NOT NULL,
     realized_error  REAL,
-    realized_return_error REAL
+    realized_return_error REAL,
+    price_return    REAL,
+    volume_change   REAL,
+    ma5_ratio       REAL,
+    ma20_ratio      REAL,
+    vwap_ratio      REAL,
+    price_range_ratio REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_ts
@@ -68,17 +86,18 @@ class PredictionStore:
 
     def __init__(self, db_path: str = "predictions.db"):
         self.db_path = db_path
-        # Use a single persistent connection so :memory: databases survive
-        # across operations (each new sqlite3.connect(":memory:") creates a
-        # fresh empty DB).  For file-based databases this is also fine —
-        # SQLite handles concurrency via file locking.
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         try:
             self._conn.execute("ALTER TABLE predictions ADD COLUMN realized_return_error REAL")
         except sqlite3.OperationalError:
-            pass  # column already exists
+            pass
+        for col in ("price_return", "volume_change", "ma5_ratio", "ma20_ratio", "vwap_ratio", "price_range_ratio"):
+            try:
+                self._conn.execute(f"ALTER TABLE predictions ADD COLUMN {col} REAL")
+            except sqlite3.OperationalError:
+                pass
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -92,17 +111,27 @@ class PredictionStore:
         predicted_price: float,
         predicted_return: float,
         model_version: str,
+        price_return: Optional[float] = None,
+        volume_change: Optional[float] = None,
+        ma5_ratio: Optional[float] = None,
+        ma20_ratio: Optional[float] = None,
+        vwap_ratio: Optional[float] = None,
+        price_range_ratio: Optional[float] = None,
     ) -> int:
         """Insert a prediction row and return its auto-incremented ID."""
         cursor = self._conn.execute(
             """
             INSERT INTO predictions
                 (timestamp, symbol, current_price, predicted_price,
-                 predicted_return, model_version, realized_error)
-            VALUES (?, ?, ?, ?, ?, ?, NULL)
+                 predicted_return, model_version, realized_error,
+                 price_return, volume_change, ma5_ratio, ma20_ratio,
+                 vwap_ratio, price_range_ratio)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
             """,
             (timestamp, symbol, current_price, predicted_price,
-             predicted_return, model_version),
+             predicted_return, model_version,
+             price_return, volume_change, ma5_ratio, ma20_ratio,
+             vwap_ratio, price_range_ratio),
         )
         self._conn.commit()
         return cursor.lastrowid
@@ -213,13 +242,24 @@ class PredictionStore:
 
         updated = 0
         for ts, actual_price in realized_prices.items():
+            row = self._conn.execute(
+                "SELECT current_price, predicted_return FROM predictions WHERE timestamp = ? AND realized_error IS NULL",
+                (ts,),
+            ).fetchone()
+            if row is None:
+                continue
+            prev_current_price, predicted_return = row
+            actual_return = (actual_price - prev_current_price) / prev_current_price
+            return_error = actual_return - predicted_return
+
             cursor = self._conn.execute(
                 """
                 UPDATE predictions
-                SET realized_error = ? - predicted_price
+                SET realized_error = ? - predicted_price,
+                    realized_return_error = ?
                 WHERE timestamp = ? AND realized_error IS NULL
                 """,
-                (actual_price, ts),
+                (actual_price, return_error, ts),
             )
             updated += cursor.rowcount
         self._conn.commit()
@@ -297,6 +337,57 @@ class PredictionStore:
             return None
         return (row["sse"] / row["n"]) ** 0.5
 
+    # ------------------------------------------------------------------
+    # Drift-detection helpers (Phase 12)
+    # ------------------------------------------------------------------
+    def get_recent_feature_rows(self, symbol: str, limit: int = 500) -> "pd.DataFrame":
+        """Return recent feature observations for a symbol as a DataFrame.
+
+        Used by the drift-detection pipeline to build the ``current_data``
+        distribution to compare against the training reference.
+        """
+        import pandas as pd
+
+        rows = self._conn.execute(
+            """
+            SELECT price_return, volume_change, ma5_ratio, ma20_ratio,
+                   vwap_ratio, price_range_ratio
+            FROM predictions
+            WHERE symbol = ? AND price_return IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (symbol, limit),
+        ).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame(rows, columns=[
+            "price_return", "volume_change", "ma5_ratio", "ma20_ratio",
+            "vwap_ratio", "price_range_ratio",
+        ])
+
+    def get_recent_return_errors(self, symbol: str, limit: int = 500) -> "pd.Series":
+        """Return recent ``realized_return_error`` values as a Series.
+
+        Used by the drift-detection pipeline for concept-drift checks on
+        prediction-error distributions.
+        """
+        import pandas as pd
+
+        rows = self._conn.execute(
+            """
+            SELECT realized_return_error
+            FROM predictions
+            WHERE symbol = ? AND realized_return_error IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (symbol, limit),
+        ).fetchall()
+        if not rows:
+            return pd.Series(dtype=float)
+        return pd.Series([r[0] for r in rows])
+
 
 def _row_to_record(row: sqlite3.Row) -> PredictionRecord:
     return PredictionRecord(
@@ -308,4 +399,11 @@ def _row_to_record(row: sqlite3.Row) -> PredictionRecord:
         predicted_return=row["predicted_return"],
         model_version=row["model_version"],
         realized_error=row["realized_error"],
+        realized_return_error=row["realized_return_error"],
+        price_return=row["price_return"],
+        volume_change=row["volume_change"],
+        ma5_ratio=row["ma5_ratio"],
+        ma20_ratio=row["ma20_ratio"],
+        vwap_ratio=row["vwap_ratio"],
+        price_range_ratio=row["price_range_ratio"],
     )

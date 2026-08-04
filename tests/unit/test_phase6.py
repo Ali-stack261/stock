@@ -227,5 +227,6 @@ class Phase6Tests(unittest.TestCase):
         # With no production model yet this is a first deploy -> promotable.
         self.assertTrue(report["promotable"])
 
+
 if __name__ == "__main__":
     unittest.main()
