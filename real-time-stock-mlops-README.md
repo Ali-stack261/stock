@@ -440,21 +440,54 @@ Tools:
 
 ---
 
-## Phase 12 – Drift Detection
+## Phase 12 – Drift Detection ✅ Complete
 
-Evidently AI continuously compares live data with the training dataset.
+A statistical drift-detection module compares live feature data and prediction errors against the training baseline to catch data and concept drift before model quality degrades.
 
-```text
-Training Data
-      │
-      ▼
- Drift Detection (statistical tests: PSI, KS-test, KL-divergence)
-      ▲
-      │
-Live Data
-```
+### Implementation
 
-If significant drift is detected on either **features** (data drift) or **prediction error** (concept drift), retraining is triggered automatically — with a cooldown period to avoid retrain storms.
+- `monitoring/drift.DriftDetector` wraps PSI and KS-test logic behind a single `check()` API.
+- **Feature drift** — compares each live feature column against the reference distribution using Population Stability Index (PSI) and the two-sample Kolmogorov-Smirnov test.
+- **Concept drift** — compares live prediction-error distributions against the reference errors using the same statistical tests.
+- **Cooldown gating** — a configurable cooldown timer (default 30 min) suppresses duplicate retrain triggers so that a single drift event does not storm the retraining pipeline.
+- **Evidently AI integration** — when available, the module delegates to Evidently's `DataDriftPreset` and `RegressionErrorDistribution` metrics; otherwise it falls back to scipy/numpy implementations so tests run in minimal environments.
+
+### Statistical tests
+
+| Test | Purpose |
+|---|---|
+| **PSI** | Quantifies how much a distribution has shifted (threshold: 0.2). |
+| **KS-test** | Tests whether two samples come from the same distribution (threshold: p < 0.05). |
+
+### Drift triggers
+
+| Drift type | Trigger condition |
+|---|---|
+| Feature drift | Any single feature exceeds PSI threshold OR KS-test p-value. |
+| Concept drift | Prediction-error distribution exceeds PSI or KS-test threshold. |
+
+### Environment
+
+- `scipy>=1.11` added to `requirements.txt` for PSI and KS-test computations.
+- `evidently` optionally used when installed for richer reporting.
+
+### Test coverage
+
+| Test | Result |
+|---|---|
+| `test_no_drift_when_distributions_identical` | ✅ Passed |
+| `test_feature_drift_detected_on_shifted_distribution` | ✅ Passed |
+| `test_no_drift_on_slightly_noisy_distribution` | ✅ Passed |
+| `test_concept_drift_detected_on_error_shift` | ✅ Passed |
+| `test_no_concept_drift_when_errors_stable` | ✅ Passed |
+| `test_no_concept_drift_without_prediction_errors` | ✅ Passed |
+| `test_cooldown_suppresses_duplicate_trigger` | ✅ Passed |
+| `test_cooldown_expires_after_configured_minutes` | ✅ Passed |
+| `test_triggered_true_only_when_drift_and_no_cooldown` | ✅ Passed |
+| `test_multiple_features_evaluated_independently` | ✅ Passed |
+| `test_compute_psi_returns_zero_for_identical_arrays` | ✅ Passed |
+| `test_compute_psi_returns_positive_for_shifted_arrays` | ✅ Passed |
+| `test_drift_report_repr` | ✅ Passed |
 
 ---
 
