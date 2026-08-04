@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: serving-api
-          image: serving-api:latest
+          image: ${{ secrets.REGISTRY_URL }}/serving-api:${{ github.sha }}
           ports:
             - containerPort: 8000
           env:
