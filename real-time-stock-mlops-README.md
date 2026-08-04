@@ -541,29 +541,71 @@ A manual `POST /drift/check?symbol=<sym>` endpoint (auth required) lets operator
 
 ---
 
-## Phase 13 – Automated Retraining
+## Phase 13 – Automated Retraining ✅ Complete
+
+An Apache Airflow DAG (`airflow/dags/retrain_pipeline.py`) automates the full retrain-to-promotion pipeline, triggered by drift detection or a scheduled interval.
+
+### DAG flow
 
 ```text
-Drift Detected (or scheduled interval)
-       │
-       ▼
-Apache Airflow DAG
-       │
-       ▼
-Retrain Model
-       │
-       ▼
-Evaluate vs baseline + current production model
-       │
-       ▼
-MLflow
-       │
-       ▼
-Register New Model (Staging)
-       │
-       ▼
-Canary Deploy → Full Rollout (or auto-rollback if canary underperforms)
+[check_drift_trigger]  — poll DriftDetector for any tracked symbol
+          │
+          ▼
+[pull_training_data]   — read latest Parquet from Phase 5 data lake
+          │
+          ▼
+[validate_training_data] — schema + range checks via Phase 6 validator
+          │
+          ▼
+[train_and_evaluate]   — call existing training/train.py pipeline
+          │
+          ▼
+[check_promotable]     — branch on report["promotable"]
+     ┌─────┴─────┐
+     ▼           ▼
+[register_and_promote] [log_and_notify_only]
+     │
+     ▼
+[reload_serving_model] — touch signal file for serving layer hot-reload
 ```
+
+### Trigger mechanism
+
+**Polling (recommended, implemented):** the DAG runs every 15 minutes and independently checks drift state by loading `reference_features.parquet` and querying recent live data from `PredictionStore`. This keeps `serving/app.py` completely decoupled from Airflow — the serving layer just exposes drift status via the `/drift/check` endpoint and Prometheus gauges, same as Phase 11/12.
+
+### Cooldown coordination
+
+`DriftDetector` owns the cooldown timer (default 30 min). The DAG trusts `triggered=True` as the single source of truth for "should we retrain right now" and does not add a second independent cooldown.
+
+### Reference dataset lifecycle
+
+`reference_features.parquet` is saved **only after successful model promotion** (in the DAG's `register_and_promote` task), not unconditionally inside `train_and_evaluate()`. This ensures the drift reference always tracks the *deployed* model's training distribution, not just the most recent training attempt.
+
+### Local development
+
+- `docker-compose.airflow.yml` — brings up Postgres + Airflow webserver + scheduler.
+- Mount `./airflow/dags` to `/opt/airflow/dags` in the container.
+- Access the UI at `http://localhost:8080`.
+
+### Environment
+
+- `apache-airflow==2.9.0` added to `requirements.txt`.
+- `LocalExecutor` + Postgres metadata DB for single-machine dev.
+- DAG file uses `importlib.util` loading in tests to avoid the local `airflow/` namespace-package shadowing the installed package.
+
+### Test coverage
+
+| Test | Result |
+|---|---|
+| `test_dag_file_imports_cleanly` | ✅ Passed |
+| `test_drift_check_symbols_includes_all_tracked` | ✅ Passed |
+| `test_drift_triggered_returns_true` | ✅ Passed |
+| `test_no_reference_returns_false` | ✅ Passed |
+| `test_stable_data_returns_false` | ✅ Passed |
+| `test_register_and_promote_saves_reference_on_promotion` | ✅ Passed |
+| `test_register_and_promote_no_reference_when_not_promoted` | ✅ Passed |
+| `test_log_and_notify_only` | ✅ Passed |
+| `test_reload_serving_model_touches_signal` | ✅ Passed |
 
 ---
 

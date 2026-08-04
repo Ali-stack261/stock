@@ -438,7 +438,6 @@ def train_and_evaluate(
     6. Apply ``should_promote_challenger()`` — the model is only promotable if
        it beats the baseline (and, when an existing production RMSE is
        supplied, beats that too).
-    7. Save a reference feature sample for Phase 12 drift detection.
 
     Parameters
     ----------
@@ -510,14 +509,6 @@ def train_and_evaluate(
         mlflow.log_param("promotable", str(promotable))
         mlflow.log_param("beats_baseline", str(beats_baseline))
 
-    # Phase 12 — save a reference feature sample for live drift detection.
-    feature_cols = list(MODEL_FEATURE_COLS)
-    reference_sample = train_df.select(feature_cols).sample(fraction=0.1, seed=42).toPandas()
-    ref_path = "reference_features.parquet"
-    reference_sample.to_parquet(ref_path, index=False)
-    mlflow.log_artifact(ref_path)
-    mlflow.log_param("reference_sample_rows", len(reference_sample))
-
     return {
         "model": model,
         "run_id": run_id,
@@ -529,7 +520,6 @@ def train_and_evaluate(
         "beats_baseline": beats_baseline,
         "should_promote_challenger": promotion_decision,
         "promotable": promotable,
-        "reference_sample_path": ref_path,
     }
 
 
