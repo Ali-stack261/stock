@@ -130,7 +130,7 @@ def get_prediction_store() -> PredictionStore:
 # Drift detection wiring (Phase 12)
 # ---------------------------------------------------------------------------
 DRIFT_CHECK_INTERVAL_SECONDS = 900  # 15 minutes
-DRIFT_CHECK_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
+DRIFT_CHECK_SYMBOLS = ["BTCUSDT", "ETHUSDT", "AAPL"]
 _DRIFT_TASK: Optional[asyncio.Task] = None
 _DRIFT_DETECTOR: Optional[DriftDetector] = None
 

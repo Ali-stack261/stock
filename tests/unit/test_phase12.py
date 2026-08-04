@@ -319,6 +319,12 @@ class Phase12WiredDriftTests(unittest.TestCase):
             (0.0, 1.0),
         )
 
+    def test_drift_check_symbols_covers_all_tracked_symbols(self):
+        from serving.app import DRIFT_CHECK_SYMBOLS
+        self.assertIn("BTCUSDT", DRIFT_CHECK_SYMBOLS)
+        self.assertIn("ETHUSDT", DRIFT_CHECK_SYMBOLS)
+        self.assertIn("AAPL", DRIFT_CHECK_SYMBOLS)
+
 
 if __name__ == "__main__":
     unittest.main()
