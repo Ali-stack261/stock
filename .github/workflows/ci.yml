@@ -1,0 +1,155 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  fast-tests:
+    name: Fast Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - run: pip install --no-cache-dir -r requirements.txt
+        env:
+          PIP_NO_CACHE_DIR: 1
+
+      - run: pytest tests/unit/test_phase1.py tests/unit/test_phase2.py tests/unit/test_transports.py tests/unit/test_adapters.py tests/unit/test_phase9.py -v
+
+  spark-mlflow-tests:
+    name: Spark + MLflow Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - run: pip install --no-cache-dir -r requirements.txt
+        env:
+          PIP_NO_CACHE_DIR: 1
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+
+      - run: pytest tests/unit/test_phase3.py tests/unit/test_phase5.py tests/unit/test_phase6.py tests/unit/test_phase8.py tests/unit/test_phase10.py tests/unit/test_phase11.py tests/unit/test_phase12.py -v
+
+  airflow-tests:
+    name: Airflow Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - run: pip install --no-cache-dir apache-airflow==2.9.0 pytest
+        env:
+          PIP_NO_CACHE_DIR: 1
+
+      - run: pytest tests/unit/test_phase13.py -v
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - run: pip install --no-cache-dir ruff mypy
+        env:
+          PIP_NO_CACHE_DIR: 1
+
+      - run: ruff check .
+
+      - run: mypy --ignore-missing-imports .
+
+  build-and-scan:
+    name: Build and Scan
+    needs: [fast-tests, spark-mlflow-tests, airflow-tests, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [serving-api, dashboard]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.image }}.Dockerfile
+          tags: ${{ matrix.image }}:${{ github.sha }}
+          push: false
+          load: true
+
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.image }}:${{ github.sha }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    environment:
+      name: staging
+      url: https://staging.stock-prediction.example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - run: kubectl apply -f kubernetes/staging/
+
+      - run: bash smoke-test.sh https://staging.stock-prediction.example.com
+        env:
+          STAGING_API_KEY: ${{ secrets.STAGING_API_KEY }}
+
+  deploy-production:
+    name: Deploy to Production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    environment:
+      name: production
+      url: https://stock-prediction.example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - run: kubectl apply -f kubernetes/production/

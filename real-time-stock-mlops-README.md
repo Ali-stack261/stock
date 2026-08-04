@@ -616,37 +616,71 @@ An Apache Airflow DAG (`airflow/dags/retrain_pipeline.py`) automates the full re
 
 ---
 
-## Phase 14 – CI/CD Pipeline
+## Phase 14 – CI/CD Pipeline ✅ Complete
 
-Every GitHub push triggers an automated deployment pipeline.
+A GitHub Actions pipeline automates testing, building, scanning, and deploying
+both deployables (serving API + React dashboard) to Kubernetes.
 
-```text
-GitHub Push
-      │
-      ▼
-Run Unit + Integration Tests
-      │
-      ▼
-Lint + Type Check (ruff/mypy)
-      │
-      ▼
-Data/Model Validation Tests
-      │
-      ▼
-Build Docker Image (multi-stage, minimal base)
-      │
-      ▼
-Scan Image for Vulnerabilities
-      │
-      ▼
-Push Image to Registry
-      │
-      ▼
-Deploy to Staging → Smoke Tests
-      │
-      ▼
-Deploy to Kubernetes (Production, rolling update)
-```
+### Workflow structure
+
+`.github/workflows/ci.yml` defines 6 jobs:
+
+| Job | Purpose | Isolation |
+|---|---|---|
+| `fast-tests` | Lightweight unit tests (no Spark/MLflow) | Own Python env |
+| `spark-mlflow-tests` | Spark + MLflow integration tests | Own Python + JDK 17 env |
+| `airflow-tests` | Airflow DAG tests | Own Python env (no mlflow) |
+| `lint` | ruff + mypy | Own Python env |
+| `build-and-scan` | Docker build + Trivy vulnerability scan | Runs after all tests pass |
+| `deploy-staging` → `deploy-production` | kubectl apply + smoke test | Staging first, prod on master |
+
+### Key design decisions
+
+- **JDK 17 pinned explicitly** — JDK 21 silently breaks Spark Arrow/`Unsafe` calls.
+- **Fully pinned dependencies** — `requirements.txt` has explicit pins for every
+  package; CI fails loudly if `pip install` reports conflicts.
+- **Airflow isolated into its own job** — avoids the `cryptography`/`protobuf`
+  version conflict with `mlflow` by never installing both in the same environment.
+- **Parallel jobs** — `fast-tests`, `spark-mlflow-tests`, `airflow-tests`, and
+  `lint` run in parallel, turning a ~150s serial run into ~140s wall time.
+- **Trivy vulnerability scanning** — fails the build on `HIGH`/`CRITICAL` CVEs,
+  not just reports them.
+
+### Docker images
+
+Two deployables, two Dockerfiles:
+
+- **`docker/serving-api.Dockerfile`** — multi-stage build based on
+  `eclipse-temurin:17-jdk-jammy` (JDK 17 for Spark) with Python 3.12 + venv.
+- **`docker/dashboard.Dockerfile`** — Node 20 build stage + nginx alpine serve
+  stage for the React prediction dashboard.
+
+### Smoke test
+
+`smoke-test.sh` runs against the staging deployment after every master push:
+
+1. `GET /health` — asserts the API returns a `status` field.
+2. `POST /predict` — asserts the response contains `predicted_price`.
+
+### Kubernetes manifests
+
+- `kubernetes/staging/serving-api.yaml` — 2 replicas, staging resources.
+- `kubernetes/staging/dashboard.yaml` — 2 replicas, staging resources.
+- `kubernetes/production/serving-api.yaml` — 3 replicas, production resources.
+- `kubernetes/production/dashboard.yaml` — 2 replicas, production resources.
+
+All manifests include liveness/readiness probes on `/health` and resource
+requests/limits.
+
+### Secrets
+
+Required GitHub Actions secrets:
+
+| Secret | Purpose |
+|---|---|
+| `STAGING_API_KEY` | Smoke test auth against staging |
+| `KUBE_CONFIG` | `kubeconfig` for staging + prod clusters |
+| `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` | Docker registry push (future) |
 
 ---
 
