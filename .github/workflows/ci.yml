@@ -143,6 +143,8 @@ jobs:
         with:
           kubeconfig: ${{ secrets.KUBE_CONFIG }}
 
+      - run: kubectl apply -f kubernetes/staging/
+
       - run: kubectl set image deployment/serving-api serving-api=${{ secrets.REGISTRY_URL }}/serving-api:${{ github.sha }} -n staging
 
       - run: bash smoke-test.sh https://staging.stock-prediction.example.com
@@ -163,5 +165,7 @@ jobs:
       - uses: azure/k8s-set-context@v4
         with:
           kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - run: kubectl apply -f kubernetes/production/
 
       - run: kubectl set image deployment/serving-api serving-api=${{ secrets.REGISTRY_URL }}/serving-api:${{ github.sha }} -n production

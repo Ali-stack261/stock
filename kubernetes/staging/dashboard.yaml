@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: dashboard
-          image: ${{ secrets.REGISTRY_URL }}/dashboard:${{ github.sha }}
+          image: dashboard:placeholder
           ports:
             - containerPort: 80
           resources:
