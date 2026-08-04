@@ -1,6 +1,10 @@
 import unittest
 
-from producer.adapters import adapt_payload, binance_to_market_event, finnhub_to_market_event
+from producer.adapters import (
+    adapt_payload,
+    binance_to_market_event,
+    finnhub_to_market_event,
+)
 
 
 class AdapterTests(unittest.TestCase):

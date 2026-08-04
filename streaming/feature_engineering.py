@@ -9,14 +9,27 @@ from pyspark.sql.functions import (
     first,
     lag,
     last,
-    max as max_,
-    min as min_,
-    sum as sum_,
     to_timestamp,
     window,
 )
+from pyspark.sql.functions import (
+    max as max_,
+)
+from pyspark.sql.functions import (
+    min as min_,
+)
+from pyspark.sql.functions import (
+    sum as sum_,
+)
 from pyspark.sql.streaming.state import GroupStateTimeout
-from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType, TimestampType
+from pyspark.sql.types import (
+    ArrayType,
+    DoubleType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 from pyspark.sql.window import Window
 
 FEATURE_COLUMNS = [

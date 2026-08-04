@@ -19,10 +19,8 @@ Verifies that:
 16. ``/predict`` persists feature values alongside the prediction.
 """
 
-import os
-import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -30,15 +28,13 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from monitoring.drift import DriftDetector, DriftReport
-from serving.app import app, get_predictor, get_prediction_store
+from serving.app import app, get_prediction_store, get_predictor
 from serving.auth import DEFAULT_API_KEY
+from serving.metrics import (
+    drift_detected,
+)
 from serving.prediction_store import PredictionStore
 from serving.predictor import PredictionResult
-from serving.metrics import (
-    drift_concept_drift_detected,
-    drift_detected,
-    drift_feature_drift_detected,
-)
 
 
 def _make_features(n: int = 200, seed: int = 42) -> pd.DataFrame:
@@ -122,9 +118,9 @@ class Phase12DriftDetectionTests(unittest.TestCase):
         report1 = detector.check(current)
         self.assertTrue(report1.triggered)
 
-        future_time = datetime.utcnow() + timedelta(minutes=31)
+        future_time = datetime.now(timezone.utc) + timedelta(minutes=31)
         with patch("monitoring.drift.datetime") as mock_dt:
-            mock_dt.utcnow.return_value = future_time
+            mock_dt.now.return_value = future_time
             report2 = detector.check(current)
             self.assertTrue(report2.triggered)
             self.assertFalse(report2.cooldown_active)

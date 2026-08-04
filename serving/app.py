@@ -43,7 +43,6 @@ import logging
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -52,7 +51,6 @@ from prometheus_client import make_asgi_app
 from pydantic import BaseModel, Field
 
 from monitoring.drift import DriftDetector
-
 from serving.auth import verify_api_key
 from serving.metrics import (
     drift_concept_drift_detected,
@@ -115,7 +113,7 @@ rate_limiter = RateLimiter()
 # Prediction store — persists every prediction for later realized-error
 # backfill and rolling online accuracy (Phase 10).
 # ---------------------------------------------------------------------------
-_prediction_store: Optional[PredictionStore] = None
+_prediction_store: PredictionStore | None = None
 
 
 def get_prediction_store() -> PredictionStore:
@@ -131,11 +129,11 @@ def get_prediction_store() -> PredictionStore:
 # ---------------------------------------------------------------------------
 DRIFT_CHECK_INTERVAL_SECONDS = 900  # 15 minutes
 DRIFT_CHECK_SYMBOLS = ["BTCUSDT", "ETHUSDT", "AAPL"]
-_DRIFT_TASK: Optional[asyncio.Task] = None
-_DRIFT_DETECTOR: Optional[DriftDetector] = None
+_DRIFT_TASK: asyncio.Task | None = None
+_DRIFT_DETECTOR: DriftDetector | None = None
 
 
-def _load_reference_data() -> Optional[pd.DataFrame]:
+def _load_reference_data() -> pd.DataFrame | None:
     """Load the training reference feature sample saved by the training pipeline.
 
     Tries ``reference_features.parquet`` in the working directory (saved by
@@ -158,7 +156,7 @@ def _run_drift_check_for_symbol(symbol: str, store: PredictionStore) -> None:
     # Load persisted cooldown state so it survives process restarts.
     last_trigger = store.get_last_drift_trigger_time(symbol)
     if last_trigger is not None:
-        _DRIFT_DETECTOR._last_trigger_time = last_trigger  # noqa: SLF001
+        _DRIFT_DETECTOR._last_trigger_time = last_trigger
 
     recent_features = store.get_recent_feature_rows(symbol, limit=500)
     recent_errors = store.get_recent_return_errors(symbol, limit=500)
@@ -242,13 +240,13 @@ class PredictionHistoryItem(BaseModel):
     predicted_price: float
     predicted_return: float
     model_version: str
-    realized_error: Optional[float] = None
-    price_return: Optional[float] = None
-    volume_change: Optional[float] = None
-    ma5_ratio: Optional[float] = None
-    ma20_ratio: Optional[float] = None
-    vwap_ratio: Optional[float] = None
-    price_range_ratio: Optional[float] = None
+    realized_error: float | None = None
+    price_return: float | None = None
+    volume_change: float | None = None
+    ma5_ratio: float | None = None
+    ma20_ratio: float | None = None
+    vwap_ratio: float | None = None
+    price_range_ratio: float | None = None
 
 
 class DriftCheckResponse(BaseModel):
@@ -290,7 +288,7 @@ app = FastAPI(
 app.mount("/prometheus", make_asgi_app())
 
 # The predictor is created lazily so the app can start without a Spark session.
-_predictor: Optional[Predictor] = None
+_predictor: Predictor | None = None
 
 
 def get_predictor() -> Predictor:
@@ -311,8 +309,8 @@ async def health():
 async def predict(
     request: PredictionRequest,
     api_key: str = Depends(verify_api_key),
-    predictor: Predictor = Depends(get_predictor),
-    store: PredictionStore = Depends(get_prediction_store),
+    predictor: Predictor = Depends(get_predictor),  # noqa: B008
+    store: PredictionStore = Depends(get_prediction_store),  # noqa: B008
 ) -> PredictionResponse:
     """Return a next-tick price prediction.
 
@@ -419,7 +417,7 @@ async def get_prediction_history(
     symbol: str,
     limit: int = 10,
     api_key: str = Depends(verify_api_key),
-    store: PredictionStore = Depends(get_prediction_store),
+    store: PredictionStore = Depends(get_prediction_store),  # noqa: B008
 ) -> list[PredictionHistoryItem]:
     """Return recent stored predictions for a symbol (Phase 10)."""
     records = store.get_recent_predictions(symbol, limit=limit)
@@ -446,9 +444,9 @@ async def get_prediction_history(
 
 @app.get("/metrics/accuracy")
 async def get_accuracy_metrics(
-    symbol: Optional[str] = None,
+    symbol: str | None = None,
     api_key: str = Depends(verify_api_key),
-    store: PredictionStore = Depends(get_prediction_store),
+    store: PredictionStore = Depends(get_prediction_store),  # noqa: B008
 ) -> dict:
     """Return rolling online accuracy metrics (RMSE, MAE) from realized predictions."""
     rmse = store.compute_rolling_rmse(symbol=symbol)
@@ -464,7 +462,7 @@ async def get_accuracy_metrics(
 async def run_drift_check(
     symbol: str,
     api_key: str = Depends(verify_api_key),
-    store: PredictionStore = Depends(get_prediction_store),
+    store: PredictionStore = Depends(get_prediction_store),  # noqa: B008
 ) -> DriftCheckResponse:
     """Run drift detection for a symbol against the training reference.
 

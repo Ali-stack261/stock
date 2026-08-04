@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any
 
 
-def binance_to_market_event(raw: Dict[str, Any]) -> Dict[str, Any]:
+def binance_to_market_event(raw: dict[str, Any]) -> dict[str, Any]:
     """Convert Binance trade payloads into the normalized event shape."""
     if not isinstance(raw, dict):
-        raise ValueError("Binance payload must be a dictionary")
+        raise TypeError("Binance payload must be a dictionary")
 
     if all(key in raw for key in ("symbol", "price", "volume", "timestamp")):
         return {
@@ -34,10 +34,10 @@ def binance_to_market_event(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def finnhub_to_market_event(raw: Dict[str, Any]) -> Dict[str, Any]:
+def finnhub_to_market_event(raw: dict[str, Any]) -> dict[str, Any]:
     """Convert Finnhub trade payloads into the normalized event shape."""
     if not isinstance(raw, dict):
-        raise ValueError("Finnhub payload must be a dictionary")
+        raise TypeError("Finnhub payload must be a dictionary")
 
     if all(key in raw for key in ("symbol", "price", "volume", "timestamp")):
         return {
@@ -69,7 +69,7 @@ def finnhub_to_market_event(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def adapt_payload(payload: Dict[str, Any], source: str) -> Dict[str, Any]:
+def adapt_payload(payload: dict[str, Any], source: str) -> dict[str, Any]:
     """Adapt an exchange-specific payload into the internal normalized event shape."""
     if source == "binance":
         return binance_to_market_event(payload)

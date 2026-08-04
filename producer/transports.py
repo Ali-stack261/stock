@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import Any, Optional
 
 import websockets
 
@@ -24,7 +23,7 @@ class BaseWebSocketTransport:
         if self.source == "finnhub":
             self._loop.run_until_complete(self._ws.send(json.dumps({"type": "subscribe", "symbol": "BINANCE:BTCUSDT"})))
 
-    def receive(self, timeout: Optional[float] = None) -> Optional[str]:
+    def receive(self, timeout: float | None = None) -> str | None:
         if self._ws is None:
             raise RuntimeError("Transport is not connected")
         if timeout is not None:
@@ -42,10 +41,10 @@ class BaseWebSocketTransport:
 
 
 class BinanceTransport(BaseWebSocketTransport):
-    def __init__(self, url: Optional[str] = None):
+    def __init__(self, url: str | None = None):
         super().__init__(url or os.getenv("BINANCE_WEBSOCKET_URL", "wss://stream.binance.com:9443/ws/btcusdt@trade"), "binance")
 
 
 class FinnhubTransport(BaseWebSocketTransport):
-    def __init__(self, url: Optional[str] = None):
+    def __init__(self, url: str | None = None):
         super().__init__(url or os.getenv("FINNHUB_WEBSOCKET_URL", "wss://ws.finnhub.io?token=demo"), "finnhub")

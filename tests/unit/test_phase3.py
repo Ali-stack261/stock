@@ -2,7 +2,6 @@ import sys
 import unittest
 
 import pytest
-
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
 from streaming.feature_engineering import compute_features

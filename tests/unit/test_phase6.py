@@ -1,12 +1,12 @@
 import os
 import shutil
 import tempfile
+import unittest
 import uuid
 from pathlib import Path
-import unittest
+
 import mlflow
 from mlflow.tracking import MlflowClient
-
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
 from streaming.spark_stream import build_spark_session
@@ -149,7 +149,7 @@ class Phase6Tests(unittest.TestCase):
         train_df, val_df, _ = chronological_split(prepared_df, 0.6, 0.2)
 
         mlflow.set_experiment("test_completes_without_error")
-        model, train_rmse, val_rmse, run_id = train_gbt_model(train_df, val_df)
+        model, train_rmse, val_rmse, _run_id = train_gbt_model(train_df, val_df)
 
         # It should run and return valid metrics
         self.assertIsNotNone(model)
@@ -169,7 +169,7 @@ class Phase6Tests(unittest.TestCase):
         experiment_id = mlflow.create_experiment(f"test_{uuid.uuid4().hex}")
         mlflow.set_experiment(experiment_id=experiment_id)
 
-        model, train_rmse, val_rmse, run_id = train_gbt_model(train_df, val_df)
+        _model, _train_rmse, val_rmse, _run_id = train_gbt_model(train_df, val_df)
 
         client = MlflowClient()
         runs = client.search_runs(experiment_ids=[experiment_id])

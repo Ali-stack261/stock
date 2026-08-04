@@ -34,15 +34,16 @@ storage cost as history grows.
 
 from __future__ import annotations
 
-import os
 import shutil
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import col, dayofmonth, month, to_timestamp, year
 
+if TYPE_CHECKING:
+    import pyspark
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,8 +72,8 @@ def write_raw_stream(
     df: DataFrame,
     base_path: str,
     checkpoint_path: str,
-    trigger_seconds: Optional[int] = 30,
-) -> "pyspark.sql.streaming.StreamingQuery":
+    trigger_seconds: int | None = 30,
+) -> pyspark.sql.streaming.StreamingQuery:
     """Write validated raw market events to the data lake via Structured Streaming.
 
     Parameters
@@ -115,8 +116,8 @@ def write_features_stream(
     df: DataFrame,
     base_path: str,
     checkpoint_path: str,
-    trigger_seconds: Optional[int] = 30,
-) -> "pyspark.sql.streaming.StreamingQuery":
+    trigger_seconds: int | None = 30,
+) -> pyspark.sql.streaming.StreamingQuery:
     """Write computed feature rows to the features lake via Structured Streaming.
 
     Parameters
@@ -276,7 +277,7 @@ def compact_partition(
 def apply_retention_policy(
     base_path: str,
     retention_days: int = 90,
-    reference_date: Optional[date] = None,
+    reference_date: date | None = None,
     dry_run: bool = False,
 ) -> list[str]:
     """Delete partition directories older than ``retention_days``.
@@ -304,7 +305,7 @@ def apply_retention_policy(
         Paths that were deleted (or would have been deleted in dry-run mode).
     """
     if reference_date is None:
-        reference_date = date.today()
+        reference_date = datetime.now(timezone.utc).date()
 
     cutoff = reference_date - timedelta(days=retention_days)
     deleted: list[str] = []

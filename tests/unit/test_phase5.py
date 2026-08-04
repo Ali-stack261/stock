@@ -1,16 +1,18 @@
 import os
-import sys
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 
-import pytest
+from pyspark.sql.types import (
+    DoubleType,
+    StringType,
+    StructField,
+    StructType,
+)
 
-from pyspark.sql.types import DoubleType, StringType, StructField, StructType, TimestampType
-
-from streaming.spark_stream import build_spark_session
 from streaming.feature_engineering import compute_features
+from streaming.spark_stream import build_spark_session
 from streaming.storage import (
     apply_retention_policy,
     compact_partition,

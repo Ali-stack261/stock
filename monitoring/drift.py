@@ -21,8 +21,7 @@ minimal environments.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -79,7 +78,7 @@ class DriftDetector:
         cooldown_minutes: int = 30,
         psi_threshold: float = 0.2,
         ks_alpha: float = 0.05,
-        initial_last_trigger_time: Optional[datetime] = None,
+        initial_last_trigger_time: datetime | None = None,
     ):
         self.reference_data = reference_data
         self.cooldown_minutes = cooldown_minutes
@@ -88,7 +87,7 @@ class DriftDetector:
         self._last_trigger_time = initial_last_trigger_time
 
     @property
-    def last_trigger_time(self) -> Optional[datetime]:
+    def last_trigger_time(self) -> datetime | None:
         """Return the last time a retrain trigger fired."""
         return self._last_trigger_time
 
@@ -98,14 +97,14 @@ class DriftDetector:
     def _is_cooled_down(self) -> bool:
         if self._last_trigger_time is None:
             return True
-        return datetime.utcnow() - self._last_trigger_time >= timedelta(
+        return datetime.now(timezone.utc) - self._last_trigger_time >= timedelta(
             minutes=self.cooldown_minutes
         )
 
     def check(
         self,
         current_data: pd.DataFrame,
-        prediction_errors: Optional[pd.Series] = None,
+        prediction_errors: pd.Series | None = None,
     ) -> DriftReport:
         """Run drift detection on the supplied current data.
 
@@ -130,7 +129,7 @@ class DriftDetector:
         cooldown_active = not self._is_cooled_down()
 
         if any_drift and not cooldown_active:
-            self._last_trigger_time = datetime.utcnow()
+            self._last_trigger_time = datetime.now(timezone.utc)
             logger.warning(
                 "Drift detected — retrain trigger fired (cooldown=%d min)",
                 self.cooldown_minutes,
@@ -157,14 +156,14 @@ class DriftDetector:
     # ------------------------------------------------------------------
     def _check_feature_drift(self, current_data: pd.DataFrame) -> dict:
         try:
-            from evidently.report import Report
-            from evidently.metric_preset import DataDriftPreset
-
             return self._check_feature_drift_evidently(current_data)
         except ImportError:
             return self._check_feature_drift_fallback(current_data)
 
     def _check_feature_drift_evidently(self, current_data: pd.DataFrame) -> dict:
+        from evidently.metric_preset import DataDriftPreset
+        from evidently.report import Report
+
         report = Report(metrics=[DataDriftPreset()])
         report.run(reference_data=self.reference_data, current_data=current_data)
         result = report.as_dict()
@@ -220,7 +219,7 @@ class DriftDetector:
     # ------------------------------------------------------------------
     # Concept drift
     # ------------------------------------------------------------------
-    def _check_concept_drift(self, prediction_errors: Optional[pd.Series] = None) -> dict:
+    def _check_concept_drift(self, prediction_errors: pd.Series | None = None) -> dict:
         if prediction_errors is None or len(prediction_errors) < 4:
             return {
                 "detected": False,
@@ -229,14 +228,14 @@ class DriftDetector:
             }
 
         try:
-            from evidently.report import Report
-            from evidently.metrics import RegressionErrorDistribution
-
             return self._check_concept_drift_evidently(prediction_errors)
         except ImportError:
             return self._check_concept_drift_fallback(prediction_errors)
 
     def _check_concept_drift_evidently(self, prediction_errors: pd.Series) -> dict:
+        from evidently.metrics import RegressionErrorDistribution
+        from evidently.report import Report
+
         mid = len(prediction_errors) // 2
         ref_errors = prediction_errors.iloc[:mid] if mid > 0 else prediction_errors
         cur_errors = prediction_errors.iloc[mid:]

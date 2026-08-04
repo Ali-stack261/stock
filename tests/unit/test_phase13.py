@@ -17,7 +17,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -31,7 +31,6 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 _DAG_PATH = Path(__file__).resolve().parents[2] / "airflow" / "dags" / "retrain_pipeline.py"
 
-from unittest.mock import MagicMock
 
 _airflow_mock = MagicMock()
 _airflow_ops_mock = MagicMock()
@@ -104,7 +103,7 @@ class Phase13DriftTriggerTests(unittest.TestCase):
             try:
                 os.chdir(tmpdir)
                 ti = MockTaskInstance()
-                result = check_drift_trigger(**{"ti": ti})
+                result = check_drift_trigger(ti=ti)
                 self.assertFalse(result)
             finally:
                 os.chdir(orig_cwd)
@@ -126,23 +125,25 @@ class Phase13DriftTriggerTests(unittest.TestCase):
                 )
                 store.get_last_drift_trigger_time.return_value = None
 
-                with patch.object(_retrain_dag, "PredictionStore", return_value=store):
-                    with patch.object(_retrain_dag, "DriftDetector") as MockDetector:
-                        mock_detector = MagicMock()
-                        mock_report = MagicMock()
-                        mock_report.triggered = True
-                        mock_report.feature_drift_detected = True
-                        mock_report.concept_drift_detected = False
-                        mock_report.cooldown_active = False
-                        mock_report.feature_details = {"drifted_columns": [{"column": "price_return"}]}
-                        mock_report.concept_details = {}
-                        mock_detector.check.return_value = mock_report
-                        MockDetector.return_value = mock_detector
+                with (
+                    patch.object(_retrain_dag, "PredictionStore", return_value=store),
+                    patch.object(_retrain_dag, "DriftDetector") as MockDetector,
+                ):
+                    mock_detector = MagicMock()
+                    mock_report = MagicMock()
+                    mock_report.triggered = True
+                    mock_report.feature_drift_detected = True
+                    mock_report.concept_drift_detected = False
+                    mock_report.cooldown_active = False
+                    mock_report.feature_details = {"drifted_columns": [{"column": "price_return"}]}
+                    mock_report.concept_details = {}
+                    mock_detector.check.return_value = mock_report
+                    MockDetector.return_value = mock_detector
 
-                        ti = MockTaskInstance()
-                        result = check_drift_trigger(**{"ti": ti})
-                        self.assertTrue(result)
-                        self.assertEqual(store.set_last_drift_trigger_time.call_count, 3)
+                    ti = MockTaskInstance()
+                    result = check_drift_trigger(ti=ti)
+                    self.assertTrue(result)
+                    self.assertEqual(store.set_last_drift_trigger_time.call_count, 3)
             finally:
                 os.chdir(orig_cwd)
 
@@ -161,17 +162,19 @@ class Phase13DriftTriggerTests(unittest.TestCase):
                     np.random.default_rng(42).normal(0, 1, 200)
                 )
 
-                with patch.object(_retrain_dag, "PredictionStore", return_value=store):
-                    with patch.object(_retrain_dag, "DriftDetector") as MockDetector:
-                        mock_detector = MagicMock()
-                        mock_report = MagicMock()
-                        mock_report.triggered = False
-                        mock_detector.check.return_value = mock_report
-                        MockDetector.return_value = mock_detector
+                with (
+                    patch.object(_retrain_dag, "PredictionStore", return_value=store),
+                    patch.object(_retrain_dag, "DriftDetector") as MockDetector,
+                ):
+                    mock_detector = MagicMock()
+                    mock_report = MagicMock()
+                    mock_report.triggered = False
+                    mock_detector.check.return_value = mock_report
+                    MockDetector.return_value = mock_detector
 
-                        ti = MockTaskInstance()
-                        result = check_drift_trigger(**{"ti": ti})
-                        self.assertFalse(result)
+                    ti = MockTaskInstance()
+                    result = check_drift_trigger(ti=ti)
+                    self.assertFalse(result)
             finally:
                 os.chdir(orig_cwd)
 
@@ -183,7 +186,7 @@ class Phase13PromotionTests(unittest.TestCase):
             try:
                 os.chdir(tmpdir)
 
-                report = {
+                {
                     "model": MagicMock(),
                     "run_id": "test-run",
                     "test_rmse": 0.01,
@@ -196,7 +199,7 @@ class Phase13PromotionTests(unittest.TestCase):
                     with patch.object(_retrain_dag, "_save_reference_sample") as mock_save:
                         mock_save.return_value = None
                         ti = MockTaskInstance()
-                        result = register_and_promote(**{"ti": ti})
+                        result = register_and_promote(ti=ti)
 
                 self.assertEqual(result["status"], "promoted")
                 mock_save.assert_called_once()
@@ -209,7 +212,7 @@ class Phase13PromotionTests(unittest.TestCase):
             try:
                 os.chdir(tmpdir)
 
-                report = {
+                {
                     "model": MagicMock(),
                     "run_id": "test-run",
                     "test_rmse": 0.05,
@@ -220,7 +223,7 @@ class Phase13PromotionTests(unittest.TestCase):
                 with patch.object(_retrain_dag, "run_registry_gate") as mock_gate:
                     mock_gate.return_value = {"status": "staging_only", "version": "2"}
                     ti = MockTaskInstance()
-                    result = register_and_promote(**{"ti": ti})
+                    result = register_and_promote(ti=ti)
 
                 self.assertEqual(result["status"], "staging_only")
                 self.assertFalse(Path("reference_features.parquet").exists())
@@ -236,7 +239,7 @@ class Phase13UtilityTaskTests(unittest.TestCase):
             "beats_baseline": False,
             "promotable": False,
         })
-        result = log_and_notify_only(**{"ti": ti})
+        result = log_and_notify_only(ti=ti)
         self.assertEqual(result["status"], "not_promoted")
         self.assertEqual(result["reason"], "failed_gate")
 
@@ -246,7 +249,7 @@ class Phase13UtilityTaskTests(unittest.TestCase):
             try:
                 os.chdir(tmpdir)
                 ti = MockTaskInstance()
-                reload_serving_model(**{"ti": ti})
+                reload_serving_model(ti=ti)
                 self.assertTrue(Path("model_reload_signal").exists())
             finally:
                 os.chdir(orig_cwd)
@@ -256,8 +259,8 @@ class Phase13CooldownPersistenceTests(unittest.TestCase):
     """Tests that cooldown state survives across separate DAG runs."""
 
     def test_cooldown_persists_across_separate_dag_runs(self):
-        from serving.prediction_store import PredictionStore
         from monitoring.drift import DriftDetector
+        from serving.prediction_store import PredictionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_cwd = os.getcwd()
@@ -293,14 +296,14 @@ class Phase13CooldownPersistenceTests(unittest.TestCase):
                 os.chdir(tmpdir)
                 store = PredictionStore(db_path=":memory:")
 
-                when = datetime(2026, 8, 4, 12, 0, 0)
+                when = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
                 store.set_last_drift_trigger_time("BTCUSDT", when)
 
                 loaded = store.get_last_drift_trigger_time("BTCUSDT")
                 self.assertEqual(loaded, when)
 
                 # Overwrite with a later time.
-                later = datetime(2026, 8, 4, 12, 35, 0)
+                later = datetime(2026, 8, 4, 12, 35, 0, tzinfo=timezone.utc)
                 store.set_last_drift_trigger_time("BTCUSDT", later)
                 loaded2 = store.get_last_drift_trigger_time("BTCUSDT")
                 self.assertEqual(loaded2, later)
@@ -311,8 +314,8 @@ class Phase13CooldownPersistenceTests(unittest.TestCase):
                 os.chdir(orig_cwd)
 
     def test_cooldown_expires_after_30_minutes(self):
-        from serving.prediction_store import PredictionStore
         from monitoring.drift import DriftDetector
+        from serving.prediction_store import PredictionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_cwd = os.getcwd()
@@ -332,7 +335,7 @@ class Phase13CooldownPersistenceTests(unittest.TestCase):
 
                 # Simulate 31 minutes passing by loading from store with a
                 # manually-set old timestamp.
-                old_time = datetime.utcnow() - timedelta(minutes=31)
+                old_time = datetime.now(timezone.utc) - timedelta(minutes=31)
                 store.set_last_drift_trigger_time("TEST", old_time)
                 last_trigger = store.get_last_drift_trigger_time("TEST")
                 detector2 = DriftDetector(reference, cooldown_minutes=30, initial_last_trigger_time=last_trigger)

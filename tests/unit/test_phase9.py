@@ -6,7 +6,7 @@ mocked predictor so no Spark/MLflow is needed).
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 

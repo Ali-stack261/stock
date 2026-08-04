@@ -25,7 +25,6 @@ Flow (matches the Phase 8 spec):
     Production Model (100% traffic)
 """
 
-from typing import Optional
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -45,10 +44,10 @@ TAG_CANARY = "canary"
 def register_model_staging(
     run_id: str,
     model_name: str = MODEL_NAME,
-    model_uri: Optional[str] = None,
-    test_rmse: Optional[float] = None,
-    beats_baseline: Optional[bool] = None,
-    promotable: Optional[bool] = None,
+    model_uri: str | None = None,
+    test_rmse: float | None = None,
+    beats_baseline: bool | None = None,
+    promotable: bool | None = None,
 ) -> int:
     """Register a trained model to the MLflow Model Registry in Staging.
 
@@ -99,7 +98,7 @@ def register_model_staging(
     return result.version
 
 
-def get_production_model_rmse(model_name: str = MODEL_NAME) -> Optional[float]:
+def get_production_model_rmse(model_name: str = MODEL_NAME) -> float | None:
     """Return the holdout test RMSE of the current production model version.
 
     Returns ``None`` if no model is in the Production stage yet.

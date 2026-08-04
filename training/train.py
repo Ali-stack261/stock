@@ -13,19 +13,23 @@ Responsibilities
 - Evaluate the model against the baselines and enforce a promotion gate.
 """
 
+
+from typing import TYPE_CHECKING
+
 import mlflow
 import mlflow.spark
-from typing import Optional, Tuple
-
 from pyspark.ml import Pipeline
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.regression import GBTRegressor
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, lag, lit, percent_rank
 from pyspark.sql.window import Window
 
 from streaming.feature_engineering import compute_features
+
+if TYPE_CHECKING:
+    import pyspark.ml
 
 # ---------------------------------------------------------------------------
 # Feature set — scale-invariant only.
@@ -146,7 +150,7 @@ def prepare_training_data(raw_df: DataFrame) -> DataFrame:
 
 def chronological_split(
     df: DataFrame, train_ratio: float = 0.7, val_ratio: float = 0.15
-) -> Tuple[DataFrame, DataFrame, DataFrame]:
+) -> tuple[DataFrame, DataFrame, DataFrame]:
     """Split the dataset chronologically to prevent look-ahead leakage.
 
     Parameters
@@ -276,9 +280,9 @@ def predicted_return_to_price(current_price: float, predicted_return: float) -> 
 def train_gbt_model(
     train_df: DataFrame,
     val_df: DataFrame,
-    feature_cols: Optional[list[str]] = None,
+    feature_cols: list[str] | None = None,
     label_col: str = TARGET_RETURN_COL,
-) -> Tuple["pyspark.ml.PipelineModel", float, float, str]:
+) -> tuple["pyspark.ml.PipelineModel", float, float, str]:
     """Train a Gradient Boosted Trees model using Spark MLlib.
 
     Parameters
@@ -370,7 +374,7 @@ def train_gbt_model(
 
 def should_promote_challenger(
     challenger_rmse: float,
-    production_rmse: Optional[float],
+    production_rmse: float | None,
     min_improvement_pct: float = 0.0,
 ) -> bool:
     """Return True if the challenger model should replace the production model.
@@ -421,7 +425,7 @@ def train_and_evaluate(
     raw_df: DataFrame,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
-    production_rmse: Optional[float] = None,
+    production_rmse: float | None = None,
     baseline_min_improvement_pct: float = 0.0,
 ) -> dict:
     """Run the full training pipeline with an enforced model-quality gate.

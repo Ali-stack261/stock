@@ -8,9 +8,7 @@ interval from the validation RMSE logged during training.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Optional
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -44,7 +42,7 @@ class Predictor:
     def __init__(
         self,
         model_name: str = MODEL_NAME,
-        tracking_uri: Optional[str] = None,
+        tracking_uri: str | None = None,
         ci_z: float = DEFAULT_CI_Z,
     ):
         self.model_name = model_name
@@ -53,8 +51,8 @@ class Predictor:
             mlflow.set_tracking_uri(tracking_uri)
 
         self._model = None
-        self._version: Optional[str] = None
-        self._val_rmse: Optional[float] = None
+        self._version: str | None = None
+        self._val_rmse: float | None = None
 
     # ------------------------------------------------------------------
     # Model loading

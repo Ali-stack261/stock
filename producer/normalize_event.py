@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any
 
 
-def normalize_event(payload: Dict[str, Any], source: str = "unknown") -> Dict[str, Any]:
+def normalize_event(payload: dict[str, Any], source: str = "unknown") -> dict[str, Any]:
     """Normalize an incoming market payload into a consistent event shape."""
     if not isinstance(payload, dict):
-        raise ValueError("payload must be a dictionary")
+        raise TypeError("payload must be a dictionary")
 
     required_fields = {"symbol", "price", "volume", "timestamp"}
     missing = required_fields.difference(payload.keys())

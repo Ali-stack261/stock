@@ -9,7 +9,6 @@ dev key is used so the service works out-of-the-box locally.
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from fastapi import Header, HTTPException, status
 
@@ -39,7 +38,7 @@ def get_valid_api_keys() -> set[str]:
     return {DEFAULT_API_KEY}
 
 
-async def verify_api_key(x_api_key: Optional[str] = Header(None)) -> str:
+async def verify_api_key(x_api_key: str | None = Header(None)) -> str:
     """FastAPI dependency that validates the ``X-API-Key`` header.
 
     Raises a 401 if the key is missing or invalid.

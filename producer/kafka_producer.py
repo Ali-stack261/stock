@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     from kafka import KafkaProducer  # type: ignore
     from kafka.errors import KafkaError  # type: ignore
-except Exception:  # pragma: no cover - exercised in environments without a compatible kafka-python install
+except ImportError:  # pragma: no cover - exercised in environments without a compatible kafka-python install
     KafkaProducer = None
     KafkaError = Exception
 
 
 class MarketKafkaProducer:
-    def __init__(self, bootstrap_servers: Optional[list[str]] = None, topic: Optional[str] = None):
+    def __init__(self, bootstrap_servers: list[str] | None = None, topic: str | None = None):
         self.bootstrap_servers = bootstrap_servers or [os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")]
         self.topic = topic or os.getenv("KAFKA_TOPIC", "stock_prices")
         self._producer = None
@@ -36,7 +36,7 @@ class MarketKafkaProducer:
         except Exception as exc:
             raise RuntimeError(f"NoBrokersAvailable: {exc}") from exc
 
-    def send_event(self, event: Dict[str, Any]) -> None:
+    def send_event(self, event: dict[str, Any]) -> None:
         if self._producer is None:
             self._build_producer()
 

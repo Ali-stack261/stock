@@ -33,19 +33,24 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
-from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+from airflow import DAG
 from monitoring.drift import DriftDetector
 from serving.prediction_store import PredictionStore
-from training.train import MODEL_FEATURE_COLS, prepare_training_data, validate_training_data
 from training.register_model import run_registry_gate
+from training.train import (
+    MODEL_FEATURE_COLS,
+    prepare_training_data,
+)
+from training.train import (
+    validate_training_data as validate_training_dataframe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +66,7 @@ MODEL_RELOAD_SIGNAL = "model_reload_signal"
 default_args = {
     "owner": "mlops",
     "depends_on_past": False,
-    "start_date": datetime(2026, 8, 1),
+    "start_date": datetime(2026, 8, 1, tzinfo=timezone.utc),
     "retries": 0,
     "retry_delay": timedelta(minutes=5),
 }
@@ -160,7 +165,7 @@ def validate_training_data(**context: Any) -> str:
     spark = SparkSession.builder.appName("retrain_validate").getOrCreate()
     raw_df = spark.read.parquet(input_path)
 
-    validated_df = validate_training_data(raw_df)
+    validated_df = validate_training_dataframe(raw_df)
     validated_count = validated_df.count()
     logger.info("Validation passed: %d rows after cleaning", validated_count)
 
@@ -253,7 +258,7 @@ def reload_serving_model(**context: Any) -> dict:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_reference_data() -> Optional[pd.DataFrame]:
+def _load_reference_data() -> pd.DataFrame | None:
     path = Path(REFERENCE_PARQUET)
     if not path.exists():
         return None

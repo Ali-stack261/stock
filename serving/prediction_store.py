@@ -23,10 +23,12 @@ PostgreSQL / TimescaleDB (same schema, same queries).
 from __future__ import annotations
 
 import sqlite3
-from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Iterator, Optional
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 @dataclass
@@ -40,14 +42,14 @@ class PredictionRecord:
     predicted_price: float
     predicted_return: float
     model_version: str
-    realized_error: Optional[float]
-    realized_return_error: Optional[float]
-    price_return: Optional[float]
-    volume_change: Optional[float]
-    ma5_ratio: Optional[float]
-    ma20_ratio: Optional[float]
-    vwap_ratio: Optional[float]
-    price_range_ratio: Optional[float]
+    realized_error: float | None
+    realized_return_error: float | None
+    price_return: float | None
+    volume_change: float | None
+    ma5_ratio: float | None
+    ma20_ratio: float | None
+    vwap_ratio: float | None
+    price_range_ratio: float | None
 
 
 _SCHEMA = """
@@ -116,12 +118,12 @@ class PredictionStore:
         predicted_price: float,
         predicted_return: float,
         model_version: str,
-        price_return: Optional[float] = None,
-        volume_change: Optional[float] = None,
-        ma5_ratio: Optional[float] = None,
-        ma20_ratio: Optional[float] = None,
-        vwap_ratio: Optional[float] = None,
-        price_range_ratio: Optional[float] = None,
+        price_return: float | None = None,
+        volume_change: float | None = None,
+        ma5_ratio: float | None = None,
+        ma20_ratio: float | None = None,
+        vwap_ratio: float | None = None,
+        price_range_ratio: float | None = None,
     ) -> int:
         """Insert a prediction row and return its auto-incremented ID."""
         cursor = self._conn.execute(
@@ -144,7 +146,7 @@ class PredictionStore:
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
-    def get_prediction(self, prediction_id: int) -> Optional[PredictionRecord]:
+    def get_prediction(self, prediction_id: int) -> PredictionRecord | None:
         """Fetch a single prediction by ID."""
         row = self._conn.execute(
             "SELECT * FROM predictions WHERE id = ?", (prediction_id,)
@@ -164,7 +166,7 @@ class PredictionStore:
         ).fetchall()
         return [_row_to_record(r) for r in rows]
 
-    def get_unrealized_predictions(self, symbol: Optional[str] = None) -> list[PredictionRecord]:
+    def get_unrealized_predictions(self, symbol: str | None = None) -> list[PredictionRecord]:
         """Return predictions whose ``realized_error`` is still NULL."""
         if symbol:
             rows = self._conn.execute(
@@ -177,7 +179,7 @@ class PredictionStore:
             ).fetchall()
         return [_row_to_record(r) for r in rows]
 
-    def get_oldest_unrealized_prediction(self, symbol: str) -> Optional[PredictionRecord]:
+    def get_oldest_unrealized_prediction(self, symbol: str) -> PredictionRecord | None:
         """Return the single oldest unrealized prediction for a symbol, or None.
 
         Used to match each prediction to the *next* observed price for that
@@ -273,7 +275,7 @@ class PredictionStore:
     # ------------------------------------------------------------------
     # Rolling online accuracy
     # ------------------------------------------------------------------
-    def compute_rolling_rmse(self, symbol: Optional[str] = None) -> Optional[float]:
+    def compute_rolling_rmse(self, symbol: str | None = None) -> float | None:
         """Compute the RMSE over all predictions with a realized error.
 
         Returns ``None`` if no predictions have been realized yet.
@@ -301,7 +303,7 @@ class PredictionStore:
             return None
         return (row["sse"] / n) ** 0.5
 
-    def compute_rolling_mae(self, symbol: Optional[str] = None) -> Optional[float]:
+    def compute_rolling_mae(self, symbol: str | None = None) -> float | None:
         """Compute the MAE over all predictions with a realized error.
 
         Returns ``None`` if no predictions have been realized yet.
@@ -330,7 +332,7 @@ class PredictionStore:
         return row["sae"] / n
 
 
-    def compute_rolling_rmse_return(self, symbol: Optional[str] = None) -> Optional[float]:
+    def compute_rolling_rmse_return(self, symbol: str | None = None) -> float | None:
         """RMSE of realized_return_error — scale-invariant, comparable across symbols."""
         query = "SELECT COUNT(*) as n, SUM(realized_return_error * realized_return_error) as sse FROM predictions WHERE realized_return_error IS NOT NULL"
         params = ()
@@ -345,7 +347,7 @@ class PredictionStore:
     # ------------------------------------------------------------------
     # Drift-detection helpers (Phase 12)
     # ------------------------------------------------------------------
-    def get_recent_feature_rows(self, symbol: str, limit: int = 500) -> "pd.DataFrame":
+    def get_recent_feature_rows(self, symbol: str, limit: int = 500) -> pd.DataFrame:
         """Return recent feature observations for a symbol as a DataFrame.
 
         Used by the drift-detection pipeline to build the ``current_data``
@@ -371,7 +373,7 @@ class PredictionStore:
             "vwap_ratio", "price_range_ratio",
         ])
 
-    def get_recent_return_errors(self, symbol: str, limit: int = 500) -> "pd.Series":
+    def get_recent_return_errors(self, symbol: str, limit: int = 500) -> pd.Series:
         """Return recent ``realized_return_error`` values as a Series.
 
         Used by the drift-detection pipeline for concept-drift checks on
@@ -396,7 +398,7 @@ class PredictionStore:
     # ------------------------------------------------------------------
     # Drift cooldown state (Phase 13)
     # ------------------------------------------------------------------
-    def get_last_drift_trigger_time(self, symbol: str) -> Optional[datetime]:
+    def get_last_drift_trigger_time(self, symbol: str) -> datetime | None:
         """Return the last time a drift retrain was triggered for ``symbol``."""
         row = self._conn.execute(
             "SELECT last_trigger_time FROM drift_state WHERE symbol = ?",

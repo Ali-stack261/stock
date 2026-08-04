@@ -15,7 +15,7 @@ class Phase2Tests(unittest.TestCase):
 
         try:
             producer.send_event(event)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self.assertIn("NoBrokersAvailable", str(exc))
         else:
             self.assertTrue(True)

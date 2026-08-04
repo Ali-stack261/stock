@@ -1,9 +1,9 @@
 import os
 import shutil
 import tempfile
+import unittest
 import uuid
 from pathlib import Path
-import unittest
 
 import mlflow
 from mlflow.tracking import MlflowClient

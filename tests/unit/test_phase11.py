@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
-from serving.app import app, get_predictor, get_prediction_store
+from serving.app import app, get_prediction_store, get_predictor
 from serving.auth import DEFAULT_API_KEY
 from serving.prediction_store import PredictionStore
 from serving.predictor import PredictionResult

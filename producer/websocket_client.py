@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import random
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from producer.adapters import adapt_payload
 from producer.factory import build_transport
@@ -16,10 +17,10 @@ class MarketWebSocketClient:
     def __init__(
         self,
         source: str = "unknown",
-        sources: Optional[List[str]] = None,
-        handler: Optional[Callable[[Dict[str, Any]], None]] = None,
-        transport_factory: Optional[Callable[[str], Any]] = None,
-        sleep_func: Optional[Callable[[float], None]] = None,
+        sources: list[str] | None = None,
+        handler: Callable[[dict[str, Any]], None] | None = None,
+        transport_factory: Callable[[str], Any] | None = None,
+        sleep_func: Callable[[float], None] | None = None,
     ):
         self.source = source
         self.sources = [source, *(sources or [])]
@@ -29,14 +30,14 @@ class MarketWebSocketClient:
         self.current_source = source
         self._transport = None
 
-    def process_message(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def process_message(self, payload: dict[str, Any]) -> dict[str, Any]:
         adapted_payload = adapt_payload(payload, self.current_source)
         event = normalize_event(adapted_payload, source=self.current_source)
         if self.handler is not None:
             self.handler(event)
         return event
 
-    def connect(self, source: Optional[str] = None) -> None:
+    def connect(self, source: str | None = None) -> None:
         source_name = source or self.current_source
         self._transport = self.transport_factory(source_name)
         if self._transport is None:
@@ -49,7 +50,7 @@ class MarketWebSocketClient:
             try:
                 self.connect(source)
                 return
-            except Exception:
+            except Exception:  # noqa: BLE001
                 self._retry_with_backoff()
         self.connect(source)
 
@@ -85,12 +86,12 @@ class MarketWebSocketClient:
                         self._connect_with_retry(candidate)
                         self.current_source = candidate
                         break
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S112
                         continue
                 else:
                     try:
                         self._connect_with_retry(self.current_source)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         self._retry_with_backoff()
 
                 if self._transport is None:

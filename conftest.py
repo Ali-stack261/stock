@@ -27,7 +27,6 @@ external ``SPARK_SUBMIT_OPTS`` / ``PYSPARK_SUBMIT_ARGS`` is needed.
 
 import os
 import sys
-import tempfile
 
 # ---------------------------------------------------------------------------
 # HADOOP_HOME — suppress the Hadoop Shell class-init crash on Windows
