@@ -71,6 +71,11 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_ts
     ON predictions(symbol, timestamp);
+
+CREATE TABLE IF NOT EXISTS drift_state (
+    symbol TEXT PRIMARY KEY,
+    last_trigger_time TEXT
+);
 """
 
 
@@ -387,6 +392,30 @@ class PredictionStore:
         if not rows:
             return pd.Series(dtype=float)
         return pd.Series([r[0] for r in rows])
+
+    # ------------------------------------------------------------------
+    # Drift cooldown state (Phase 13)
+    # ------------------------------------------------------------------
+    def get_last_drift_trigger_time(self, symbol: str) -> Optional[datetime]:
+        """Return the last time a drift retrain was triggered for ``symbol``."""
+        row = self._conn.execute(
+            "SELECT last_trigger_time FROM drift_state WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        if row is None or row["last_trigger_time"] is None:
+            return None
+        return datetime.fromisoformat(row["last_trigger_time"])
+
+    def set_last_drift_trigger_time(self, symbol: str, when: datetime) -> None:
+        """Persist the last drift trigger time for ``symbol``."""
+        self._conn.execute(
+            """
+            INSERT INTO drift_state (symbol, last_trigger_time) VALUES (?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET last_trigger_time = excluded.last_trigger_time
+            """,
+            (symbol, when.isoformat()),
+        )
+        self._conn.commit()
 
 
 def _row_to_record(row: sqlite3.Row) -> PredictionRecord:

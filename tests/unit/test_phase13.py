@@ -124,6 +124,7 @@ class Phase13DriftTriggerTests(unittest.TestCase):
                 store.get_recent_return_errors.return_value = pd.Series(
                     np.random.default_rng(42).normal(0, 1, 200)
                 )
+                store.get_last_drift_trigger_time.return_value = None
 
                 with patch.object(_retrain_dag, "PredictionStore", return_value=store):
                     with patch.object(_retrain_dag, "DriftDetector") as MockDetector:
@@ -141,6 +142,7 @@ class Phase13DriftTriggerTests(unittest.TestCase):
                         ti = MockTaskInstance()
                         result = check_drift_trigger(**{"ti": ti})
                         self.assertTrue(result)
+                        self.assertEqual(store.set_last_drift_trigger_time.call_count, 3)
             finally:
                 os.chdir(orig_cwd)
 
@@ -246,6 +248,97 @@ class Phase13UtilityTaskTests(unittest.TestCase):
                 ti = MockTaskInstance()
                 reload_serving_model(**{"ti": ti})
                 self.assertTrue(Path("model_reload_signal").exists())
+            finally:
+                os.chdir(orig_cwd)
+
+
+class Phase13CooldownPersistenceTests(unittest.TestCase):
+    """Tests that cooldown state survives across separate DAG runs."""
+
+    def test_cooldown_persists_across_separate_dag_runs(self):
+        from serving.prediction_store import PredictionStore
+        from monitoring.drift import DriftDetector
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                store = PredictionStore(db_path=":memory:")
+                reference = _make_features(n=500, seed=42)
+                current = _make_features(n=500, seed=42)
+                current["price_return"] += 0.5
+
+                # Run 1: fresh detector, no prior state — should trigger.
+                last_trigger = store.get_last_drift_trigger_time("TEST")
+                detector1 = DriftDetector(reference, cooldown_minutes=30, initial_last_trigger_time=last_trigger)
+                report1 = detector1.check(current)
+                self.assertTrue(report1.triggered)
+                store.set_last_drift_trigger_time("TEST", detector1.last_trigger_time)
+
+                # Run 2: brand-new detector instance (simulating a new DAG run).
+                last_trigger = store.get_last_drift_trigger_time("TEST")
+                detector2 = DriftDetector(reference, cooldown_minutes=30, initial_last_trigger_time=last_trigger)
+                report2 = detector2.check(current)
+                self.assertFalse(report2.triggered)
+                self.assertTrue(report2.cooldown_active)
+            finally:
+                os.chdir(orig_cwd)
+
+    def test_prediction_store_drift_state_round_trip(self):
+        from serving.prediction_store import PredictionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                store = PredictionStore(db_path=":memory:")
+
+                when = datetime(2026, 8, 4, 12, 0, 0)
+                store.set_last_drift_trigger_time("BTCUSDT", when)
+
+                loaded = store.get_last_drift_trigger_time("BTCUSDT")
+                self.assertEqual(loaded, when)
+
+                # Overwrite with a later time.
+                later = datetime(2026, 8, 4, 12, 35, 0)
+                store.set_last_drift_trigger_time("BTCUSDT", later)
+                loaded2 = store.get_last_drift_trigger_time("BTCUSDT")
+                self.assertEqual(loaded2, later)
+
+                # Missing symbol returns None.
+                self.assertIsNone(store.get_last_drift_trigger_time("UNKNOWN"))
+            finally:
+                os.chdir(orig_cwd)
+
+    def test_cooldown_expires_after_30_minutes(self):
+        from serving.prediction_store import PredictionStore
+        from monitoring.drift import DriftDetector
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                store = PredictionStore(db_path=":memory:")
+                reference = _make_features(n=500, seed=42)
+                current = _make_features(n=500, seed=42)
+                current["price_return"] += 0.5
+
+                # Trigger once.
+                last_trigger = store.get_last_drift_trigger_time("TEST")
+                detector1 = DriftDetector(reference, cooldown_minutes=30, initial_last_trigger_time=last_trigger)
+                report1 = detector1.check(current)
+                self.assertTrue(report1.triggered)
+                store.set_last_drift_trigger_time("TEST", detector1.last_trigger_time)
+
+                # Simulate 31 minutes passing by loading from store with a
+                # manually-set old timestamp.
+                old_time = datetime.utcnow() - timedelta(minutes=31)
+                store.set_last_drift_trigger_time("TEST", old_time)
+                last_trigger = store.get_last_drift_trigger_time("TEST")
+                detector2 = DriftDetector(reference, cooldown_minutes=30, initial_last_trigger_time=last_trigger)
+                report2 = detector2.check(current)
+                self.assertTrue(report2.triggered)
+                self.assertFalse(report2.cooldown_active)
             finally:
                 os.chdir(orig_cwd)
 

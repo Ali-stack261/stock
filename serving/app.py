@@ -155,6 +155,11 @@ def _run_drift_check_for_symbol(symbol: str, store: PredictionStore) -> None:
     if _DRIFT_DETECTOR is None:
         return
 
+    # Load persisted cooldown state so it survives process restarts.
+    last_trigger = store.get_last_drift_trigger_time(symbol)
+    if last_trigger is not None:
+        _DRIFT_DETECTOR._last_trigger_time = last_trigger  # noqa: SLF001
+
     recent_features = store.get_recent_feature_rows(symbol, limit=500)
     recent_errors = store.get_recent_return_errors(symbol, limit=500)
 
@@ -169,6 +174,7 @@ def _run_drift_check_for_symbol(symbol: str, store: PredictionStore) -> None:
     drift_concept_drift_detected.labels(symbol=symbol).set(int(report.concept_drift_detected))
 
     if report.triggered:
+        store.set_last_drift_trigger_time(symbol, _DRIFT_DETECTOR.last_trigger_time)
         logger.warning(
             "Drift trigger fired for %s: feature=%s concept=%s cooldown_active=%s",
             symbol,

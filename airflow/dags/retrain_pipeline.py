@@ -78,6 +78,9 @@ def check_drift_trigger(**context: Any) -> bool:
     prediction errors from the prediction store, and runs ``DriftDetector.check()``.
     The detector's own cooldown timer is the single source of truth for
     "should we retrain right now".
+
+    Cooldown state is persisted in ``PredictionStore.drift_state`` so it
+    survives across separate DAG runs.
     """
     reference = _load_reference_data()
     if reference is None:
@@ -85,10 +88,16 @@ def check_drift_trigger(**context: Any) -> bool:
         return False
 
     store = PredictionStore(db_path="predictions.db")
-    detector = DriftDetector(reference_data=reference, cooldown_minutes=30)
 
     any_triggered = False
     for symbol in DRIFT_CHECK_SYMBOLS:
+        last_trigger = store.get_last_drift_trigger_time(symbol)
+        detector = DriftDetector(
+            reference_data=reference,
+            cooldown_minutes=30,
+            initial_last_trigger_time=last_trigger,
+        )
+
         recent_features = store.get_recent_feature_rows(symbol, limit=500)
         recent_errors = store.get_recent_return_errors(symbol, limit=500)
         if recent_features.empty:
@@ -97,14 +106,16 @@ def check_drift_trigger(**context: Any) -> bool:
 
         report = detector.check(recent_features, prediction_errors=recent_errors)
         logger.info(
-            "Drift check %s: feature=%s concept=%s triggered=%s",
+            "Drift check %s: feature=%s concept=%s triggered=%s cooldown_active=%s",
             symbol,
             report.feature_drift_detected,
             report.concept_drift_detected,
             report.triggered,
+            report.cooldown_active,
         )
         if report.triggered:
             any_triggered = True
+            store.set_last_drift_trigger_time(symbol, detector.last_trigger_time)
             context["ti"].xcom_push(
                 key=f"drift_report_{symbol}",
                 value=_drift_report_to_dict(report),

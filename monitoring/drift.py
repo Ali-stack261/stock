@@ -79,12 +79,18 @@ class DriftDetector:
         cooldown_minutes: int = 30,
         psi_threshold: float = 0.2,
         ks_alpha: float = 0.05,
+        initial_last_trigger_time: Optional[datetime] = None,
     ):
         self.reference_data = reference_data
         self.cooldown_minutes = cooldown_minutes
         self.psi_threshold = psi_threshold
         self.ks_alpha = ks_alpha
-        self._last_trigger_time: Optional[datetime] = None
+        self._last_trigger_time = initial_last_trigger_time
+
+    @property
+    def last_trigger_time(self) -> Optional[datetime]:
+        """Return the last time a retrain trigger fired."""
+        return self._last_trigger_time
 
     # ------------------------------------------------------------------
     # Public API

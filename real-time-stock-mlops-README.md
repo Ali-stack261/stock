@@ -593,6 +593,10 @@ An Apache Airflow DAG (`airflow/dags/retrain_pipeline.py`) automates the full re
 - `LocalExecutor` + Postgres metadata DB for single-machine dev.
 - DAG file uses `importlib.util` loading in tests to avoid the local `airflow/` namespace-package shadowing the installed package.
 
+### Cooldown persistence
+
+`DriftDetector._last_trigger_time` is persisted in `PredictionStore.drift_state` (SQLite) so the cooldown survives across separate DAG runs and process restarts. The DAG loads the last trigger time before checking and saves it after a successful trigger. The serving layer's background task does the same. This prevents retrain storms during sustained drift.
+
 ### Test coverage
 
 | Test | Result |
@@ -606,6 +610,9 @@ An Apache Airflow DAG (`airflow/dags/retrain_pipeline.py`) automates the full re
 | `test_register_and_promote_no_reference_when_not_promoted` | ✅ Passed |
 | `test_log_and_notify_only` | ✅ Passed |
 | `test_reload_serving_model_touches_signal` | ✅ Passed |
+| `test_cooldown_persists_across_separate_dag_runs` | ✅ Passed |
+| `test_prediction_store_drift_state_round_trip` | ✅ Passed |
+| `test_cooldown_expires_after_30_minutes` | ✅ Passed |
 
 ---
 
