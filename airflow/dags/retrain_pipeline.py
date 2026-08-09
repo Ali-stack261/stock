@@ -38,9 +38,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from airflow.operators.python import PythonOperator
 
-from airflow import DAG  # type: ignore[attr-defined]  # Airflow's __init__.py lacks static stubs for this
+# Airflow's __init__.py lacks static stubs exposing DAG for mypy; safe to ignore.
+from airflow import DAG  # type: ignore[attr-defined]
+from airflow.operators.python import PythonOperator
 from monitoring.drift import DriftDetector
 from serving.prediction_store import PredictionStore
 from training.register_model import run_registry_gate
