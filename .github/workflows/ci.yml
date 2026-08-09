@@ -19,8 +19,6 @@ jobs:
           cache: "pip"
 
       - run: pip install -r requirements.txt
-        env:
-          PIP_NO_CACHE_DIR: 1
 
       - run: pytest tests/unit/test_phase1.py tests/unit/test_phase2.py tests/unit/test_transports.py tests/unit/test_adapters.py tests/unit/test_phase9.py -v
 
@@ -42,7 +40,6 @@ jobs:
 
       - run: pip install -r requirements.txt
         env:
-          PIP_NO_CACHE_DIR: 1
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
       - run: pytest tests/unit/test_phase3.py tests/unit/test_phase5.py tests/unit/test_phase6.py tests/unit/test_phase8.py tests/unit/test_phase10.py tests/unit/test_phase11.py tests/unit/test_phase12.py -v
@@ -65,8 +62,8 @@ jobs:
 
       - run: pip install -r requirements.txt
         env:
-          PIP_NO_CACHE_DIR: 1
           JAVA_HOME: ${{ env.JAVA_HOME }}
+
 
       - run: pytest tests/unit/test_phase13.py -v
 
@@ -82,8 +79,6 @@ jobs:
           cache: "pip"
 
       - run: pip install ruff mypy
-        env:
-          PIP_NO_CACHE_DIR: 1
 
       - run: ruff check .
 
