@@ -91,6 +91,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
     strategy:
       matrix:
         image: [serving-api]
