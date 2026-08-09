@@ -40,7 +40,7 @@ from typing import Any
 import pandas as pd
 from airflow.operators.python import PythonOperator
 
-from airflow import DAG
+from airflow import DAG  # type: ignore[attr-defined]  # Airflow's __init__.py lacks static stubs for this
 from monitoring.drift import DriftDetector
 from serving.prediction_store import PredictionStore
 from training.register_model import run_registry_gate
@@ -120,6 +120,7 @@ def check_drift_trigger(**context: Any) -> bool:
         )
         if report.triggered:
             any_triggered = True
+            assert detector.last_trigger_time is not None
             store.set_last_drift_trigger_time(symbol, detector.last_trigger_time)
             context["ti"].xcom_push(
                 key=f"drift_report_{symbol}",
@@ -278,7 +279,7 @@ def _save_reference_sample() -> None:
     df = spark.read.parquet(f"{DATA_LAKE_PATH}/**/*.parquet")
 
     sample = df.select(MODEL_FEATURE_COLS).sample(fraction=0.1, seed=42).toPandas()
-    sample.to_parquet(REFERENCE_PARQUET, index=False)
+    sample.to_parquet(REFERENCE_PARQUET, index=False)  # type: ignore[attr-defined]  # pyspark's toPandas() stub return type is imprecise
     logger.info("Reference sample saved (%d rows)", len(sample))
 
 

@@ -261,6 +261,7 @@ def compact_partition(
 
     # Replace the old partition directory with the compacted one
     sc = spark.sparkContext
+    assert sc._jvm is not None, "SparkContext JVM gateway is not initialized"
     fs = sc._jvm.org.apache.hadoop.fs.FileSystem.get(sc._jsc.hadoopConfiguration())
     PathClass = sc._jvm.org.apache.hadoop.fs.Path
     

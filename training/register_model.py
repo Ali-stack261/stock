@@ -48,7 +48,7 @@ def register_model_staging(
     test_rmse: float | None = None,
     beats_baseline: bool | None = None,
     promotable: bool | None = None,
-) -> int:
+) -> str:
     """Register a trained model to the MLflow Model Registry in Staging.
 
     Parameters
@@ -118,16 +118,16 @@ def get_production_model_rmse(model_name: str = MODEL_NAME) -> float | None:
     prod = [v for v in versions if v.current_stage == PRODUCTION]
     if not prod:
         return None
-    prod.sort(key=lambda v: v.last_updated_timestamp, reverse=True)
+    prod.sort(key=lambda v: v.last_updated_timestamp or 0, reverse=True)
     tag = prod[0].tags.get(TAG_TEST_RMSE)
     return float(tag) if tag is not None else None
 
 
 def promote_to_production(
     model_name: str,
-    version: int,
+    version: str,
     canary: bool = False,
-) -> int:
+) -> str:
     """Promote a Staging model version to Production.
 
     The previous Production version (if any) is moved to Archived so it stays

@@ -44,6 +44,7 @@ sys.modules["airflow.operators.python"] = _airflow_python_mock
 
 try:
     _spec = importlib.util.spec_from_file_location("retrain_pipeline", _DAG_PATH)
+    assert _spec is not None and _spec.loader is not None
     _retrain_dag = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_retrain_dag)
 finally:

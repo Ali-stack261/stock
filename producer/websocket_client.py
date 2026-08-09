@@ -28,7 +28,7 @@ class MarketWebSocketClient:
         self.transport_factory = transport_factory or build_transport
         self.sleep_func = sleep_func or time.sleep
         self.current_source = source
-        self._transport = None
+        self._transport: Any = None
 
     def process_message(self, payload: dict[str, Any]) -> dict[str, Any]:
         adapted_payload = adapt_payload(payload, self.current_source)

@@ -67,7 +67,7 @@ class Predictor:
                 f"No production model found for '{self.model_name}'. "
                 "Train and promote a model first."
             )
-        prod.sort(key=lambda v: v.last_updated_timestamp, reverse=True)
+        prod.sort(key=lambda v: v.last_updated_timestamp or 0, reverse=True)
         latest = prod[0]
 
         model_uri = f"models:/{self.model_name}/{latest.version}"
@@ -118,6 +118,7 @@ class Predictor:
         """
         if self._model is None:
             self._load_model()
+        assert self._model is not None, "Model failed to load"
 
         # Build a single-row Spark DataFrame from the feature dict.
         from pyspark.sql import SparkSession

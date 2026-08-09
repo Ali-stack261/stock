@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from typing import Any
 
 import websockets
 
@@ -11,8 +12,8 @@ class BaseWebSocketTransport:
     def __init__(self, url: str, source: str):
         self.url = url
         self.source = source
-        self._ws = None
-        self._loop = None
+        self._ws: Any = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def connect(self) -> None:
         if self._ws is not None:
@@ -24,27 +25,31 @@ class BaseWebSocketTransport:
             self._loop.run_until_complete(self._ws.send(json.dumps({"type": "subscribe", "symbol": "BINANCE:BTCUSDT"})))
 
     def receive(self, timeout: float | None = None) -> str | None:
-        if self._ws is None:
+        if self._ws is None or self._loop is None:
             raise RuntimeError("Transport is not connected")
         if timeout is not None:
             return self._loop.run_until_complete(asyncio.wait_for(self._ws.recv(), timeout=timeout))
         return self._loop.run_until_complete(self._ws.recv())
 
     def send_ping(self) -> None:
-        if self._ws is not None:
+        if self._ws is not None and self._loop is not None:
             self._loop.run_until_complete(self._ws.ping())
 
     def close(self) -> None:
-        if self._ws is not None:
+        if self._ws is not None and self._loop is not None:
             self._loop.run_until_complete(self._ws.close())
             self._ws = None
 
 
 class BinanceTransport(BaseWebSocketTransport):
     def __init__(self, url: str | None = None):
-        super().__init__(url or os.getenv("BINANCE_WEBSOCKET_URL", "wss://stream.binance.com:9443/ws/btcusdt@trade"), "binance")
+        resolved_url = url or os.getenv("BINANCE_WEBSOCKET_URL", "wss://stream.binance.com:9443/ws/btcusdt@trade")
+        assert resolved_url is not None
+        super().__init__(resolved_url, "binance")
 
 
 class FinnhubTransport(BaseWebSocketTransport):
     def __init__(self, url: str | None = None):
-        super().__init__(url or os.getenv("FINNHUB_WEBSOCKET_URL", "wss://ws.finnhub.io?token=demo"), "finnhub")
+        resolved_url = url or os.getenv("FINNHUB_WEBSOCKET_URL", "wss://ws.finnhub.io?token=demo")
+        assert resolved_url is not None
+        super().__init__(resolved_url, "finnhub")

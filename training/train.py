@@ -14,7 +14,9 @@ Responsibilities
 """
 
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
+RegressionMetricName = Literal["rmse", "mse", "r2", "mae", "var"]
 
 import mlflow
 import mlflow.spark
@@ -185,7 +187,7 @@ def chronological_split(
     return train_df, val_df, test_df
 
 
-def evaluate_naive_baseline(df: DataFrame, metric_name: str = "rmse") -> float:
+def evaluate_naive_baseline(df: DataFrame, metric_name: RegressionMetricName = "rmse") -> float:
     """Evaluate a naive persistence baseline (prediction = current price).
 
     If our complex ML model cannot beat this simple baseline, it is not
@@ -215,7 +217,7 @@ def evaluate_naive_baseline(df: DataFrame, metric_name: str = "rmse") -> float:
     return evaluator.evaluate(baseline_df)
 
 
-def evaluate_naive_return_baseline(df: DataFrame, metric_name: str = "rmse") -> float:
+def evaluate_naive_return_baseline(df: DataFrame, metric_name: RegressionMetricName = "rmse") -> float:
     """Evaluate a zero-return baseline (prediction = 0.0 return).
 
     This is the return-space analogue of ``evaluate_naive_baseline``: with the
@@ -462,12 +464,13 @@ def train_and_evaluate(
     dict
         A report with all metrics and the promotion decision.
     """
-    mlflow.set_experiment(
-        mlflow.get_experiment_by_name("stock_training")
-        .experiment_id
-        if mlflow.get_experiment_by_name("stock_training")
+    existing_experiment = mlflow.get_experiment_by_name("stock_training")
+    experiment_id = (
+        existing_experiment.experiment_id
+        if existing_experiment is not None
         else mlflow.create_experiment("stock_training")
     )
+    mlflow.set_experiment(experiment_id=experiment_id)
 
     prepared_df = prepare_training_data(raw_df)
     train_df, val_df, test_df = chronological_split(

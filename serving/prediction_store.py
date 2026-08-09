@@ -141,6 +141,7 @@ class PredictionStore:
              vwap_ratio, price_range_ratio),
         )
         self._conn.commit()
+        assert cursor.lastrowid is not None
         return cursor.lastrowid
 
     # ------------------------------------------------------------------
@@ -335,7 +336,7 @@ class PredictionStore:
     def compute_rolling_rmse_return(self, symbol: str | None = None) -> float | None:
         """RMSE of realized_return_error — scale-invariant, comparable across symbols."""
         query = "SELECT COUNT(*) as n, SUM(realized_return_error * realized_return_error) as sse FROM predictions WHERE realized_return_error IS NOT NULL"
-        params = ()
+        params: tuple[str, ...] = ()
         if symbol is not None:
             query += " AND symbol = ?"
             params = (symbol,)

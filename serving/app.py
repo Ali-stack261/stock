@@ -172,6 +172,7 @@ def _run_drift_check_for_symbol(symbol: str, store: PredictionStore) -> None:
     drift_concept_drift_detected.labels(symbol=symbol).set(int(report.concept_drift_detected))
 
     if report.triggered:
+        assert _DRIFT_DETECTOR.last_trigger_time is not None
         store.set_last_drift_trigger_time(symbol, _DRIFT_DETECTOR.last_trigger_time)
         logger.warning(
             "Drift trigger fired for %s: feature=%s concept=%s cooldown_active=%s",
