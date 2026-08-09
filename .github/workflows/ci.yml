@@ -126,6 +126,14 @@ jobs:
           severity: "HIGH,CRITICAL"
           exit-code: "1"
 
+      - name: Trivy scan (human-readable table for logs)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ steps.lowercase.outputs.owner }}/${{ matrix.image }}:${{ github.sha }}
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          exit-code: "0"
+
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
