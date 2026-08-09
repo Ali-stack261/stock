@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - run: pip install --no-cache-dir -r requirements.txt
+      - run: pip install -r requirements.txt
         env:
           PIP_NO_CACHE_DIR: 1
 
@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - run: pip install --no-cache-dir -r requirements.txt
+      - run: pip install -r requirements.txt
         env:
           PIP_NO_CACHE_DIR: 1
           JAVA_HOME: ${{ env.JAVA_HOME }}
@@ -63,7 +63,7 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - run: pip install --no-cache-dir -r requirements.txt
+      - run: pip install -r requirements.txt
         env:
           PIP_NO_CACHE_DIR: 1
           JAVA_HOME: ${{ env.JAVA_HOME }}
@@ -81,7 +81,7 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - run: pip install --no-cache-dir ruff mypy
+      - run: pip install ruff mypy
         env:
           PIP_NO_CACHE_DIR: 1
 
