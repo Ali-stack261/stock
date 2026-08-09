@@ -98,21 +98,21 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.REGISTRY_URL }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/${{ matrix.image }}.Dockerfile
-          tags: ${{ secrets.REGISTRY_URL }}/${{ matrix.image }}:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
           push: true
           load: true
 
       - uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ secrets.REGISTRY_URL }}/${{ matrix.image }}:${{ github.sha }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "HIGH,CRITICAL"
@@ -140,7 +140,10 @@ jobs:
 
       - run: kubectl apply -f kubernetes/staging/
 
-      - run: kubectl set image deployment/serving-api serving-api=${{ secrets.REGISTRY_URL }}/serving-api:${{ github.sha }} -n staging
+      - run: |
+          kubectl set image deployment/serving-api \
+            serving-api=ghcr.io/${{ github.repository_owner }}/serving-api:${{ github.sha }} \
+            -n staging
 
       - run: bash smoke-test.sh https://staging.stock-prediction.example.com
         env:
@@ -163,4 +166,7 @@ jobs:
 
       - run: kubectl apply -f kubernetes/production/
 
-      - run: kubectl set image deployment/serving-api serving-api=${{ secrets.REGISTRY_URL }}/serving-api:${{ github.sha }} -n production
+      - run: |
+          kubectl set image deployment/serving-api \
+            serving-api=ghcr.io/${{ github.repository_owner }}/serving-api:${{ github.sha }} \
+            -n production
