@@ -1,14 +1,17 @@
 # .trivyignore
 #
-# CVEs suppressed here are all in jars vendored inside PySpark's bundled Hadoop
-# client distribution (pyspark==3.5.3) — not a direct project dependency, and not
-# fixable without a PySpark 4.x upgrade, which independently breaks Arrow schema
-# serialization used by Phase 4's streaming pipeline (verified separately).
-# Re-evaluate when PySpark ships updated bundled jars, or when upgrading past 4.x
-# becomes viable.
+# All entries below are vendored inside pyspark==3.5.3's bundled Hadoop/ZooKeeper
+# client jars — not direct project dependencies. Each is individually researched
+# and confirmed unfixable without a PySpark 4.x upgrade, which independently breaks
+# Arrow schema serialization used by this project's Phase 4 streaming pipeline
+# (verified separately). Re-evaluate if either issue is resolved upstream.
 
-# jackson-mapper-asl-1.9.1 (Jackson 1.x, abandoned upstream) — CVE-2019-10172
-# zookeeper-3.6.3.jar — CVE-XXXX-XXXXX
-# derby-10.14.2.0.jar — CVE-XXXX-XXXXX
-# hadoop-client-runtime — CVE-XXXX-XXXXX
-# avro-1.11.2.jar (x2 findings) — CVE-XXXX-XXXXX, CVE-XXXX-XXXXX
+# jackson-mapper-asl 1.9.13 (org.codehaus.jackson) — abandoned upstream since ~2013,
+# forked into com.fasterxml.jackson. No fixed version exists or will exist.
+CVE-2019-10202
+
+# zookeeper 3.6.3 — PySpark's pom.xml specifies 3.9.2, but an open Spark packaging
+# bug (SPARK-49844, https://issues.apache.org/jira/browse/SPARK-49844) causes the
+# old 3.6.3 jar to be bundled anyway across the entire pyspark<4 line. Not fixed by
+# bumping to a later 3.5.x patch version — confirmed via Spark's own issue tracker.
+CVE-2023-44981
