@@ -19,6 +19,17 @@ WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Remove Spark/Hadoop-bundled jars for subsystems this project never uses
+# (HDFS/YARN, ZooKeeper cluster coordination, embedded Hive/Derby, Avro).
+# Eliminates the large majority of Trivy findings, which live in these
+# vendored jars rather than this project's actual dependencies.
+RUN find / -path "*/pyspark/jars/hadoop-client-runtime*.jar" -delete \
+    && find / -path "*/pyspark/jars/zookeeper*.jar" -delete \
+    && find / -path "*/pyspark/jars/derby*.jar" -delete \
+    && find / -path "*/pyspark/jars/avro*.jar" -delete \
+    && find / -path "*/pyspark/jars/jackson-mapper-asl*.jar" -delete
+
+
 COPY serving/ ./serving/
 COPY training/ ./training/
 COPY monitoring/ ./monitoring/
