@@ -1,0 +1,14 @@
+# .trivyignore
+#
+# CVEs suppressed here are all in jars vendored inside PySpark's bundled Hadoop
+# client distribution (pyspark==3.5.3) — not a direct project dependency, and not
+# fixable without a PySpark 4.x upgrade, which independently breaks Arrow schema
+# serialization used by Phase 4's streaming pipeline (verified separately).
+# Re-evaluate when PySpark ships updated bundled jars, or when upgrading past 4.x
+# becomes viable.
+
+# jackson-mapper-asl-1.9.1 (Jackson 1.x, abandoned upstream) — CVE-2019-10172
+# zookeeper-3.6.3.jar — CVE-XXXX-XXXXX
+# derby-10.14.2.0.jar — CVE-XXXX-XXXXX
+# hadoop-client-runtime — CVE-XXXX-XXXXX
+# avro-1.11.2.jar (x2 findings) — CVE-XXXX-XXXXX, CVE-XXXX-XXXXX

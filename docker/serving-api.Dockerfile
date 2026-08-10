@@ -3,6 +3,7 @@ FROM python:3.12-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    && apt-get purge -y --auto-remove perl perl-modules-* libperl5.* 2>/dev/null || true \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sL -o /tmp/jdk17.tar.gz \
@@ -28,6 +29,7 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    && apt-get purge -y --auto-remove perl perl-modules-* libperl5.* 2>/dev/null || true \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/jdk17 /opt/jdk17
