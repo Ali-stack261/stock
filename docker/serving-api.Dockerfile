@@ -16,8 +16,8 @@ ENV JAVA_HOME=/opt/jdk17
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
 WORKDIR /build
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-serving.txt .
+RUN pip install --no-cache-dir -r requirements-serving.txt
 
 # Remove Spark/Hadoop-bundled jars for subsystems this project never uses
 # (HDFS/YARN, ZooKeeper cluster coordination, embedded Hive/Derby, Avro).

@@ -19,3 +19,12 @@ CVE-2026-8376
 CVE-2026-57433
 CVE-2026-42496
 CVE-2026-13221
+
+# perl-base 5.40.1-6 — Debian's protected/essential package (dpkg depends on it),
+# cannot be removed from the base image. All four CVEs below have no fixed version
+# available at all; two are explicitly fix_deferred by Debian's own security team
+# (a deliberate decision, not neglect). Confirmed via actual Trivy scan output.
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-57432
+CVE-2026-9538
