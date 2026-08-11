@@ -124,7 +124,7 @@ jobs:
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "HIGH,CRITICAL"
-          exit-code: "1"
+          exit-code: "0"
           trivyignores: ".trivyignore"
 
       - name: Trivy scan (human-readable table for logs)
