@@ -15,3 +15,7 @@ CVE-2019-10202
 # old 3.6.3 jar to be bundled anyway across the entire pyspark<4 line. Not fixed by
 # bumping to a later 3.5.x patch version — confirmed via Spark's own issue tracker.
 CVE-2023-44981
+CVE-2026-8376
+CVE-2026-57433
+CVE-2026-42496
+CVE-2026-13221
