@@ -23,8 +23,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # (HDFS/YARN, ZooKeeper cluster coordination, embedded Hive/Derby, Avro).
 # Eliminates the large majority of Trivy findings, which live in these
 # vendored jars rather than this project's actual dependencies.
-RUN find / -path "*/pyspark/jars/zookeeper*.jar" -delete \
+RUN find / -path "*/pyspark/jars/hadoop-client-runtime*.jar" -delete \
+    && find / -path "*/pyspark/jars/zookeeper*.jar" -delete \
     && find / -path "*/pyspark/jars/derby*.jar" -delete \
+    && find / -path "*/pyspark/jars/avro*.jar" -delete \
     && find / -path "*/pyspark/jars/jackson-mapper-asl*.jar" -delete \
     && find / -path "*/pyspark/jars/curator-*.jar" -delete \
     && find / -path "*/pyspark/jars/hadoop-yarn-server-web-proxy*.jar" -delete \
