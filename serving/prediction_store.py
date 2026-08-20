@@ -345,6 +345,33 @@ class PredictionStore:
             return None
         return (row["sse"] / row["n"]) ** 0.5
 
+    def compute_directional_accuracy(self, symbol: str | None = None) -> float | None:
+        """Compute the % of predictions where the predicted sign matched the realized sign.
+        Requires both predicted_return and realized_return_error (from which actual return is derived).
+        realized_return_error = actual_return - predicted_return
+        so actual_return = realized_return_error + predicted_return
+        """
+        query = """
+            SELECT
+                SUM(CASE
+                    WHEN (predicted_return > 0 AND (realized_return_error + predicted_return) > 0) THEN 1
+                    WHEN (predicted_return <= 0 AND (realized_return_error + predicted_return) <= 0) THEN 1
+                    ELSE 0
+                END) as correct_count,
+                COUNT(*) as total_count
+            FROM predictions
+            WHERE realized_return_error IS NOT NULL
+        """
+        params: tuple[str, ...] = ()
+        if symbol is not None:
+            query += " AND symbol = ?"
+            params = (symbol,)
+        
+        row = self._conn.execute(query, params).fetchone()
+        if row["total_count"] == 0:
+            return None
+        return float(row["correct_count"]) / row["total_count"]
+
     # ------------------------------------------------------------------
     # Drift-detection helpers (Phase 12)
     # ------------------------------------------------------------------

@@ -248,6 +248,26 @@ def evaluate_naive_return_baseline(df: DataFrame, metric_name: RegressionMetricN
     return evaluator.evaluate(baseline_df)
 
 
+def evaluate_moving_average_baseline(df: DataFrame, window: int = 5, metric_name: RegressionMetricName = "rmse") -> float:
+    """Predict next return as the average of the last `window` realized returns,
+    rather than naive zero-change. A model that can't beat a 5-period moving
+    average isn't adding value over the simplest possible smoothing."""
+    from pyspark.sql.functions import avg
+    from pyspark.sql.window import Window as _Window
+
+    window_spec = _Window.partitionBy("symbol").orderBy("event_ts")
+    rolling_window = window_spec.rowsBetween(-(window-1), 0)
+    
+    baseline_df = df.withColumn("prediction", avg(col("price_return")).over(rolling_window))
+    
+    evaluator = RegressionEvaluator(
+        labelCol=TARGET_RETURN_COL,
+        predictionCol="prediction",
+        metricName=metric_name,
+    )
+    return evaluator.evaluate(baseline_df)
+
+
 def predicted_return_to_price(current_price: float, predicted_return: float) -> float:
     """Convert a model's predicted return back into an absolute price.
 
@@ -507,6 +527,16 @@ def train_and_evaluate(
     # regardless of the production comparison.
     promotable = beats_baseline and promotion_decision
 
+    from training.backtest import run_backtest, buy_and_hold_return
+
+    pandas_preds = test_preds.select(
+        col("prediction").alias("predicted_return"),
+        col(TARGET_RETURN_COL).alias("realized_return")
+    ).toPandas()
+
+    backtest_results = run_backtest(pandas_preds)
+    bh_return = buy_and_hold_return(pandas_preds)
+
     with mlflow.start_run(run_name="training_gate", nested=True):
         mlflow.log_metric("test_rmse", test_rmse)
         mlflow.log_metric("zero_return_baseline_test_rmse", zero_return_test_rmse)
@@ -515,6 +545,13 @@ def train_and_evaluate(
         mlflow.log_metric("val_rmse", val_rmse)
         mlflow.log_param("promotable", str(promotable))
         mlflow.log_param("beats_baseline", str(beats_baseline))
+        
+        mlflow.log_metric("backtest_total_return", backtest_results["total_return"])
+        mlflow.log_metric("backtest_sharpe_ratio", backtest_results["sharpe_ratio"])
+        mlflow.log_metric("backtest_win_rate", backtest_results["win_rate"])
+        mlflow.log_metric("backtest_profit_factor", backtest_results["profit_factor"])
+        mlflow.log_metric("backtest_directional_accuracy", backtest_results["directional_accuracy"])
+        mlflow.log_metric("buy_and_hold_return", bh_return)
 
     return {
         "model": model,
@@ -540,3 +577,46 @@ def main(raw_df: DataFrame) -> None:
     print(f"zero-return baseline test RMSE: {report['zero_return_baseline_test_rmse']:.6f}")
     print(f"beats baseline: {report['beats_baseline']}")
     print(f"promotable: {report['promotable']}")
+
+
+def walk_forward_validate(
+    df: DataFrame, feature_cols: list[str] | None = None, n_windows: int = 5,
+    train_ratio: float = 0.7,
+) -> list[dict]:
+    """Split the full timeline into n_windows sequential chunks. For each chunk,
+    train on train_ratio of it, evaluate on the remainder, before sliding to the
+    next chunk. Returns one result dict per window."""
+    results = []
+    
+    window_spec = Window.orderBy("event_ts")
+    df_with_rank = df.withColumn("global_rank", percent_rank().over(window_spec))
+    
+    for i in range(n_windows):
+        window_start = i / n_windows
+        window_end = (i + 1) / n_windows
+        
+        window_df = df_with_rank.filter(
+            (col("global_rank") >= window_start) & (col("global_rank") < window_end)
+        ).drop("global_rank")
+        
+        # Skip empty windows
+        if window_df.count() == 0:
+            continue
+            
+        train_df, val_df, _ = chronological_split(window_df, train_ratio, 1 - train_ratio)
+        
+        model, train_rmse, val_rmse, _ = train_gbt_model(train_df, val_df, feature_cols)
+        
+        baseline_rmse = evaluate_naive_return_baseline(val_df)
+        ma_baseline_rmse = evaluate_moving_average_baseline(val_df)
+        
+        results.append({
+            "window": i,
+            "train_rmse": train_rmse,
+            "val_rmse": val_rmse,
+            "zero_return_baseline_rmse": baseline_rmse,
+            "ma_baseline_rmse": ma_baseline_rmse,
+            "beats_zero_return": val_rmse < baseline_rmse,
+            "beats_ma": val_rmse < ma_baseline_rmse,
+        })
+    return results

@@ -64,6 +64,7 @@ from serving.metrics import (
     rolling_rmse,
     rolling_rmse_return,
     unrealized_predictions_total,
+    directional_accuracy,
 )
 from serving.prediction_store import PredictionStore
 from serving.predictor import PredictionResult, Predictor
@@ -375,12 +376,15 @@ async def predict(
         rmse = store.compute_rolling_rmse(symbol=request.symbol)
         rmse_return = store.compute_rolling_rmse_return(symbol=request.symbol)
         mae = store.compute_rolling_mae(symbol=request.symbol)
+        dir_acc = store.compute_directional_accuracy(symbol=request.symbol)
         if rmse is not None:
             rolling_rmse.labels(symbol=request.symbol).set(rmse)
         if rmse_return is not None:
             rolling_rmse_return.labels(symbol=request.symbol).set(rmse_return)
         if mae is not None:
             rolling_mae.labels(symbol=request.symbol).set(mae)
+        if dir_acc is not None:
+            directional_accuracy.labels(symbol=request.symbol).set(dir_acc)
 
     # Persist the new prediction for later realized-error backfill (Phase 10).
     store.save_prediction(

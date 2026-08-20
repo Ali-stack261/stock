@@ -74,6 +74,12 @@ rolling_mae = Gauge(
     labelnames=["symbol"],
 )
 
+directional_accuracy = Gauge(
+    "directional_accuracy",
+    "Rolling % of predictions with correct sign.",
+    labelnames=["symbol"],
+)
+
 unrealized_predictions_total = Gauge(
     "unrealized_predictions_total",
     "Number of predictions still awaiting realization (staleness proxy).",
