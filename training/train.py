@@ -527,7 +527,7 @@ def train_and_evaluate(
     # regardless of the production comparison.
     promotable = beats_baseline and promotion_decision
 
-    from training.backtest import run_backtest, buy_and_hold_return
+    from training.backtest import buy_and_hold_return, run_backtest
 
     pandas_preds = test_preds.select(
         col("prediction").alias("predicted_return"),
@@ -605,7 +605,7 @@ def walk_forward_validate(
             
         train_df, val_df, _ = chronological_split(window_df, train_ratio, 1 - train_ratio)
         
-        model, train_rmse, val_rmse, _ = train_gbt_model(train_df, val_df, feature_cols)
+        _model, train_rmse, val_rmse, _ = train_gbt_model(train_df, val_df, feature_cols)
         
         baseline_rmse = evaluate_naive_return_baseline(val_df)
         ma_baseline_rmse = evaluate_moving_average_baseline(val_df)

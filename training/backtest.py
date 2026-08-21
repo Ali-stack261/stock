@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def generate_signals(predictions_df: pd.DataFrame) -> pd.DataFrame:
     """Predicted return > 0 -> BUY, < 0 -> SELL. Adds a 'signal' column."""
     predictions_df["signal"] = predictions_df["predicted_return"].apply(

@@ -53,6 +53,7 @@ from pydantic import BaseModel, Field
 from monitoring.drift import DriftDetector
 from serving.auth import verify_api_key
 from serving.metrics import (
+    directional_accuracy,
     drift_concept_drift_detected,
     drift_detected,
     drift_feature_drift_detected,
@@ -64,7 +65,6 @@ from serving.metrics import (
     rolling_rmse,
     rolling_rmse_return,
     unrealized_predictions_total,
-    directional_accuracy,
 )
 from serving.prediction_store import PredictionStore
 from serving.predictor import PredictionResult, Predictor

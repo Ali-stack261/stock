@@ -180,10 +180,14 @@ jobs:
 
       - name: Update staging manifests
         run: |
-          # Example of updating image tag for Argo CD to pick up
-          # sed -i "s|image: ghcr.io/.*/serving-api:.*|image: ghcr.io/${{ steps.lowercase.outputs.owner }}/serving-api:${{ github.sha }}|g" kubernetes/staging/deployment.yaml
-          echo "Updated image to ${{ github.sha }} in staging manifests."
+          sed -i "s|image: .*/serving-api:.*|image: ghcr.io/${{ steps.lowercase.outputs.owner }}/serving-api:${{ github.sha }}|g" kubernetes/staging/serving-api.yaml
           
+      - name: Wait for Argo CD sync and smoke test
+        run: |
+          sleep 60   # give Argo CD's polling interval time to pick up the change
+          bash smoke-test.sh https://staging.stock-prediction.<your-real-domain>
+        env:
+          STAGING_API_KEY: ${{ secrets.STAGING_API_KEY }}
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
@@ -207,9 +211,7 @@ jobs:
 
       - name: Update production manifests
         run: |
-          # Example of updating image tag for Argo CD to pick up
-          # sed -i "s|image: ghcr.io/.*/serving-api:.*|image: ghcr.io/${{ steps.lowercase.outputs.owner }}/serving-api:${{ github.sha }}|g" kubernetes/production/deployment.yaml
-          echo "Updated image to ${{ github.sha }} in production manifests."
+          sed -i "s|image: .*/serving-api:.*|image: ghcr.io/${{ steps.lowercase.outputs.owner }}/serving-api:${{ github.sha }}|g" kubernetes/production/serving-api.yaml
           
       - name: Commit and push changes
         run: |
