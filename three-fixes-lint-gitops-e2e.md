@@ -172,11 +172,19 @@ now, that infrastructure work is real and separate.
 FastAPI instance — a `TestClient` runs the app in-process, exactly like the existing
 `tests/unit/test_phase9.py` already does successfully. This is achievable immediately:
 
-```python
-import unittest
-import tempfile
-import os
+### Full, final, lint-clean file — verified with `ruff check .` (0 errors) and
+`pytest` (1 passed, 1 skipped)
 
+Two more lint errors surfaced on this file after the first draft — import ordering
+(`I001`) and a `RUF015` single-element-slice suggestion — both now fixed and
+reverified:
+
+```python
+import os
+import tempfile
+import unittest
+
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -194,7 +202,7 @@ class E2EPipelineTests(unittest.TestCase):
         PredictionStore, confirming the second call's current_price genuinely
         realizes the first prediction's error — exercised through the real
         app + real store together, not unit-tested in isolation."""
-        from serving.app import app, get_predictor, get_prediction_store
+        from serving.app import app, get_prediction_store, get_predictor
         from serving.prediction_store import PredictionStore
 
         db_path = tempfile.mktemp(suffix=".db")
@@ -224,7 +232,7 @@ class E2EPipelineTests(unittest.TestCase):
             self.assertEqual(resp2.status_code, 200)
 
             history = client.get("/predictions/BTCUSDT", headers=headers).json()
-            first = [r for r in history if r["id"] == 1][0]
+            first = next(r for r in history if r["id"] == 1)
             self.assertIsNotNone(first["realized_error"])
             self.assertAlmostEqual(first["realized_error"], 100.8 - first["predicted_price"])
         finally:

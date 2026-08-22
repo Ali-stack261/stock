@@ -107,6 +107,10 @@ class PredictionStore:
                 pass
         self._conn.commit()
 
+    def close(self) -> None:
+        """Close the SQLite connection."""
+        self._conn.close()
+
     # ------------------------------------------------------------------
     # Write
     # ------------------------------------------------------------------
